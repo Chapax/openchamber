@@ -49,8 +49,8 @@ import { ProviderAccountSwitchToggle } from './ProviderAccountSwitchToggle';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { CustomProviderForm } from './CustomProviderForm';
 
-import { ProviderOAuthMethods } from './ProviderOAuthMethods';
-import { ProviderApiKeyForm, type IntegrationKeyRequest } from './ProviderApiKeyForm';
+import { ProviderAuthMethodCards } from './ProviderAuthMethodCards';
+import type { IntegrationKeyRequest } from './ProviderApiKeyForm';
 import {
   buildIntegrationKeyRequest,
   buildProviderUpsertRequest,
@@ -668,33 +668,22 @@ export const ProvidersPage: React.FC = () => {
                 <>
                   {(() => {
                     const candidateIntegration = findIntegrationForProvider(integrations ?? [], candidateProviderId);
-                    const candidateSignInMethods = getSignInMethods(
-                      findIntegrationForProvider(integrations ?? [], getSignInIntegrationId(candidateProviderId)),
-                    );
-                    const showApiKey = shouldShowApiKeyAuth(candidateIntegration);
-
                     return (
-                      <>
-                        {showApiKey ? (
-                          <ProviderApiKeyForm
-                            key={candidateProviderId}
-                            integrationId={candidateProviderId}
-                            keyMethod={getKeyMethod(candidateIntegration)}
-                            connectKey={connectIntegrationKey}
-                            onSaved={() => markAuthWriteSucceeded(candidateProviderId)}
-                          />
-                        ) : null}
-
-                        {candidateSignInMethods.length > 0 ? (
-                          <ProviderOAuthMethods
-                            key={candidateProviderId}
-                            integrationId={getSignInIntegrationId(candidateProviderId)}
-                            methods={candidateSignInMethods}
-                            onConnected={() => handleOAuthConnected(candidateProviderId)}
-                            className={cn(showApiKey && 'border-t border-[var(--surface-subtle)] pt-2')}
-                          />
-                        ) : null}
-                      </>
+                      <ProviderAuthMethodCards
+                        key={candidateProviderId}
+                        integrationId={candidateProviderId}
+                        showApiKey={shouldShowApiKeyAuth(candidateIntegration)}
+                        keyMethod={getKeyMethod(candidateIntegration)}
+                        signInIntegrationId={getSignInIntegrationId(candidateProviderId)}
+                        signInMethods={getSignInMethods(
+                          findIntegrationForProvider(integrations ?? [], getSignInIntegrationId(candidateProviderId)),
+                        )}
+                        connections={[]}
+                        activeId={null}
+                        connectKey={connectIntegrationKey}
+                        onKeySaved={() => markAuthWriteSucceeded(candidateProviderId)}
+                        onSignedIn={() => handleOAuthConnected(candidateProviderId)}
+                      />
                     );
                   })()}
                 </>
@@ -912,32 +901,19 @@ export const ProvidersPage: React.FC = () => {
         {!showAuthPanel || enterpriseLocked ? null : authLoading ? (
           <div className="py-1.5 typography-meta text-muted-foreground">{t('settings.providers.page.auth.loadingMethods')}</div>
         ) : (
-          <div
-            className={cn(
-              'space-y-4',
-              providerConnections.length > 0 && 'oc-tile rounded-xl p-4',
-            )}
-          >
-            {showApiKeyAuth ? (
-              <ProviderApiKeyForm
-                key={selectedProvider.id}
-                integrationId={selectedProvider.id}
-                keyMethod={getKeyMethod(selectedIntegration)}
-                connectKey={connectIntegrationKey}
-                onSaved={() => markAuthWriteSucceeded(selectedProvider.id)}
-              />
-            ) : null}
-
-            {signInMethods.length > 0 && (
-              <ProviderOAuthMethods
-                key={selectedProvider.id}
-                integrationId={getSignInIntegrationId(selectedProvider.id)}
-                methods={signInMethods}
-                onConnected={() => handleOAuthConnected(selectedProvider.id)}
-                className={cn(showApiKeyAuth && 'border-t border-[var(--surface-subtle)] pt-2')}
-              />
-            )}
-          </div>
+          <ProviderAuthMethodCards
+            key={selectedProvider.id}
+            integrationId={selectedProvider.id}
+            showApiKey={showApiKeyAuth}
+            keyMethod={getKeyMethod(selectedIntegration)}
+            signInIntegrationId={getSignInIntegrationId(selectedProvider.id)}
+            signInMethods={signInMethods}
+            connections={providerConnections}
+            activeId={activeAccountId}
+            connectKey={connectIntegrationKey}
+            onKeySaved={() => markAuthWriteSucceeded(selectedProvider.id)}
+            onSignedIn={() => handleOAuthConnected(selectedProvider.id)}
+          />
         )}
       </SettingsSection>
 
