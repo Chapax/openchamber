@@ -106,6 +106,8 @@ export const ProviderAuthMethodCards: React.FC<ProviderAuthMethodCardsProps> = (
       else next.delete(kind);
       return next;
     });
+    // Closing drops what was typed, so it reopens on Add account again.
+    if (!open) stopAdding(kind);
   };
 
   const statusOf = (kind: CredentialMethod, stored: readonly CredentialConnection[]): MethodStatus => {

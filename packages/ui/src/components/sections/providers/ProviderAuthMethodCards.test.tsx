@@ -131,6 +131,11 @@ test('each card holds its own accounts and says which kind is in use', async () 
   expect(view.keyField()).toBeNull();
   await view.click(view.button('Add account'));
   expect(view.keyField()).not.toBeNull();
+
+  // Closing the card drops the half-added key, so it reopens on Add account.
+  await view.click(view.card('API key'));
+  await view.click(view.card('API key'));
+  expect(view.keyField()).toBeNull();
 });
 
 test('a sign-in card with an account offers another behind Add account', async () => {
