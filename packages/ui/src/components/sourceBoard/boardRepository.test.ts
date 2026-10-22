@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { choiceForFocus, folderOfRepository, repositoryLabel, resolveBoardRepository, resolvePullLinkTarget, shouldRememberAll } from './boardRepository';
+import { choiceForFocus, folderOfRepository, repositoryLabel, resolveBoardRepository, resolveBoardTab, resolvePullLinkTarget, shouldRememberAll } from './boardRepository';
 import { repositoryUrlOfItemLink } from './openTrackerItem';
 
 const ROOT = '/work';
@@ -174,5 +174,32 @@ describe('repositoryUrlOfItemLink', () => {
     expect(repositoryUrlOfItemLink('https://github.com/Acme/API/pull/12/files')).toBe('https://github.com/acme/api');
     expect(repositoryUrlOfItemLink('https://gitlab.example.com/group/sub/repo/-/merge_requests/7')).toBe('https://gitlab.example.com/group/sub/repo');
     expect(repositoryUrlOfItemLink('#12')).toBeNull();
+  });
+});
+
+describe('resolveBoardTab', () => {
+  const tab = (overrides: Partial<Parameters<typeof resolveBoardTab>[0]>) => resolveBoardTab({
+    chosen: 'repository', hasRepository: false, repositoryStatus: 'ready', hasLinear: true, linearConnected: false, ...overrides,
+  });
+
+  test('shows the repository tab when the project has one', () => {
+    expect(tab({ hasRepository: true })).toBe('repository');
+    expect(tab({ hasRepository: true, linearConnected: true })).toBe('repository');
+  });
+
+  test('keeps Linear when the user chose it, connected or not', () => {
+    expect(tab({ chosen: 'linear', hasRepository: true })).toBe('linear');
+    expect(tab({ chosen: 'linear' })).toBe('linear');
+    expect(tab({ chosen: 'linear', hasLinear: false, hasRepository: true })).toBe('repository');
+  });
+
+  test('turns to Linear without a repository only when Linear is connected', () => {
+    expect(tab({ linearConnected: true })).toBe('linear');
+    expect(tab({})).toBeNull();
+    expect(tab({ repositoryStatus: 'failed' })).toBeNull();
+  });
+
+  test('does not pick Linear while the folder is still searched', () => {
+    expect(tab({ repositoryStatus: 'pending', linearConnected: true })).toBeNull();
   });
 });

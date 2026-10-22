@@ -51,7 +51,7 @@ import { SourceBoardAcrossNote } from './SourceBoardAcrossNote';
 import { SourceBoardChecksDialog } from './SourceBoardChecksDialog';
 import { SourceBoardLabels, SourceBoardReviewers } from './SourceBoardMetaEditors';
 import { SourceBoardProjectPicker, SourceBoardRepositoryPicker, SourceBoardTeamPicker } from './SourceBoardPickers';
-import { choiceForFocus, shouldRememberAll, useBoardRepository } from './boardRepository';
+import { choiceForFocus, resolveBoardTab, shouldRememberAll, useBoardRepository } from './boardRepository';
 import { isSameRepositoryItemLink } from './openTrackerItem';
 import { usePullAttachments } from './pullAttachments';
 import { useThreadActions } from './threadActions';
@@ -195,10 +195,8 @@ const SourceBoard: React.FC<{ layout: SourceBoardLayout; onLeave?: () => void; o
     const hasRepository = allRepositories !== null || hostProvider === 'github' || hostProvider === 'gitlab';
     const hasLinear = Boolean(linear);
     const linearConnected = useLinearAuthStore((state) => state.status?.connected === true);
-    // Until the folder says whether it holds a repository, Linear is not the answer.
-    const tab: SourceBoardTab | null = choice.tab === 'linear' && hasLinear
-        ? 'linear'
-        : hasRepository ? 'repository' : repository.status === 'pending' ? null : hasLinear ? 'linear' : null;
+    const linearPending = useLinearAuthStore((state) => hasLinear && state.status === null);
+    const tab = resolveBoardTab({ chosen: choice.tab, hasRepository, repositoryStatus: repository.status, hasLinear, linearConnected });
 
     const linearWorkspaceId = useLinearAuthStore((state) => state.status?.organization?.id ?? '');
     const mapping = useLinearMapping(tab === 'linear' && linearConnected, linearWorkspaceId);
@@ -231,14 +229,18 @@ const SourceBoard: React.FC<{ layout: SourceBoardLayout; onLeave?: () => void; o
         />
     ) : null;
     const projectScope = <>{projectPicker}{repositoryPicker}</>;
-    // On Linear the board lists a team, not a project.
+    // On Linear the board lists a team. The project's pickers stay beside it
+    // when the project offers no repository tab, the only other way off Linear.
     const scopePicker = tab === 'linear' ? (
-        <SourceBoardTeamPicker
-            teams={teams}
-            selectedTeamId={linearTeamId}
-            onSelectTeam={(teamId) => updateChoice({ linearTeamId: teamId })}
-            onWorkspaceSwitched={() => updateChoice({ linearTeamId: null })}
-        />
+        <>
+            {hasRepository ? null : projectScope}
+            <SourceBoardTeamPicker
+                teams={teams}
+                selectedTeamId={linearTeamId}
+                onSelectTeam={(teamId) => updateChoice({ linearTeamId: teamId })}
+                onWorkspaceSwitched={() => updateChoice({ linearTeamId: null })}
+            />
+        </>
     ) : projectScope;
 
     const selectKind = (kind: SourceBoardKind) => {
@@ -258,7 +260,7 @@ const SourceBoard: React.FC<{ layout: SourceBoardLayout; onLeave?: () => void; o
                 ) : (
                     <div className="flex h-12 shrink-0 items-center gap-1 border-b border-border/60 px-2">{projectScope}</div>
                 )}
-                {repository.status === 'ready' ? (
+                {repository.status === 'ready' && !linearPending ? (
                     <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center typography-meta text-muted-foreground">
                         <span>{t(projects.length === 0 ? 'sourceBoard.empty.noProjects' : 'sourceBoard.empty.noSource')}</span>
                         {projects.length > 0 ? (
@@ -266,10 +268,13 @@ const SourceBoard: React.FC<{ layout: SourceBoardLayout; onLeave?: () => void; o
                         ) : null}
                     </div>
                 ) : (
-                    // Looking for the folder's repositories, or unable to: neither says there are none.
+                    // Looking for the folder's repositories or asking whether Linear is
+                    // connected, or unable to: none of these says there is nothing.
                     <div role="status" className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center typography-meta text-muted-foreground">
-                        {repository.status === 'pending' ? <Icon name="loader-4" className="size-5 animate-spin" /> : null}
-                        <span>{t(repository.status === 'failed' ? 'gitView.empty.discoverFailed' : 'gitView.empty.discoveringRepositories')}</span>
+                        {repository.status !== 'failed' ? <Icon name="loader-4" className="size-5 animate-spin" /> : null}
+                        {repository.status !== 'ready' ? (
+                            <span>{t(repository.status === 'failed' ? 'gitView.empty.discoverFailed' : 'gitView.empty.discoveringRepositories')}</span>
+                        ) : null}
                         {repository.status === 'failed' ? (
                             <Button size="sm" variant="outline" onClick={repository.retry}>
                                 <Icon name="refresh" className="size-3.5" />

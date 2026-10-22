@@ -7,6 +7,7 @@ import { normalizePath } from '@/lib/pathNormalization';
 import { useRepositoryBindings } from '@/lib/source-control/repository-binding';
 import { repositoryLinkFromRemotes } from '@/lib/source-control/repositoryUrl';
 import { useGitStore, useIsGitRepo, useNestedRepos, type NestedRepoDiscovery } from '@/stores/useGitStore';
+import type { SourceBoardTab } from '@/stores/useSourceBoardStore';
 import { useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
 import { normalizeContextPanelDirectoryKey } from '@/stores/useUIStore';
 
@@ -80,6 +81,27 @@ export const choiceForFocus = (choice: RepositoryChoice, focusPending: boolean):
 export const shouldRememberAll = (resolution: BoardRepository, storedAll: boolean | undefined, focusPending: boolean): boolean => (
     focusPending && resolution.all && storedAll !== true
 );
+
+/**
+ * The tab the board shows, or null for its no-source or loading screen, which
+ * keeps the project pickers. Linear stays the user's choice while the runtime
+ * has it. Otherwise the repository tab when the project has one; until the
+ * folder says whether it holds a repository, Linear is not the answer, and
+ * without one the board turns to Linear on its own only when it is connected:
+ * an unconnected Linear tab lists nothing and hides the project pickers.
+ */
+export function resolveBoardTab(options: {
+    chosen: SourceBoardTab;
+    hasRepository: boolean;
+    repositoryStatus: BoardRepository['status'];
+    hasLinear: boolean;
+    linearConnected: boolean;
+}): SourceBoardTab | null {
+    if (options.chosen === 'linear' && options.hasLinear) return 'linear';
+    if (options.hasRepository) return 'repository';
+    if (options.repositoryStatus === 'pending') return null;
+    return options.linearConnected ? 'linear' : null;
+}
 
 /** A repository's path below the project's root, as the pickers name it. */
 export const repositoryLabel = (repository: string, root: string): string => {
