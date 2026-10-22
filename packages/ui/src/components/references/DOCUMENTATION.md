@@ -166,12 +166,13 @@ preview's footer holds actions instead of what the agent gets.
   turn finishes.
 - The repository tab is the project's host only: GitHub or GitLab, whichever
   `useRepositoryHostProvider` names; a project with no supported remote shows
-  Linear alone while Linear is connected, and otherwise the no-source note with
-  the project pickers. The runtime always has a Linear API, so "Linear is
-  offered" is never the test: falling back to an unconnected Linear left an
-  empty Linear tab with no project picker, and the board remembers its project,
-  so nothing led back. Until Linear's status first arrives the board shows a
-  loading state, never the no-source note.
+  Linear alone unless Linear is known to be disconnected, and then the
+  no-source note with the project pickers. The runtime always has a Linear API,
+  so "Linear is offered" is never the test: falling back to an unconnected
+  Linear left an empty Linear tab with no project picker, and the board
+  remembers its project, so nothing led back. Until Linear's status first
+  arrives the board shows a loading state; a failed status read is not a
+  disconnect, so it falls back to Linear, which keeps the project pickers.
 - On Linear the scope picker is the team picker. When the project offers no
   repository tab, the project and repository pickers stay beside it: they are
   the only way off Linear for that project.

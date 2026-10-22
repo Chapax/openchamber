@@ -179,27 +179,31 @@ describe('repositoryUrlOfItemLink', () => {
 
 describe('resolveBoardTab', () => {
   const tab = (overrides: Partial<Parameters<typeof resolveBoardTab>[0]>) => resolveBoardTab({
-    chosen: 'repository', hasRepository: false, repositoryStatus: 'ready', hasLinear: true, linearConnected: false, ...overrides,
+    chosen: 'repository', hasRepository: false, repositoryStatus: 'ready', linear: 'disconnected', ...overrides,
   });
 
   test('shows the repository tab when the project has one', () => {
     expect(tab({ hasRepository: true })).toBe('repository');
-    expect(tab({ hasRepository: true, linearConnected: true })).toBe('repository');
+    expect(tab({ hasRepository: true, linear: 'connected' })).toBe('repository');
+    expect(tab({ hasRepository: true, linear: 'pending' })).toBe('repository');
   });
 
   test('keeps Linear when the user chose it, connected or not', () => {
     expect(tab({ chosen: 'linear', hasRepository: true })).toBe('linear');
     expect(tab({ chosen: 'linear' })).toBe('linear');
-    expect(tab({ chosen: 'linear', hasLinear: false, hasRepository: true })).toBe('repository');
+    expect(tab({ chosen: 'linear', linear: 'absent', hasRepository: true })).toBe('repository');
   });
 
-  test('turns to Linear without a repository only when Linear is connected', () => {
-    expect(tab({ linearConnected: true })).toBe('linear');
+  test('turns to Linear without a repository unless Linear is known to be disconnected', () => {
+    expect(tab({ linear: 'connected' })).toBe('linear');
+    expect(tab({ linear: 'unknown' })).toBe('linear');
     expect(tab({})).toBeNull();
+    expect(tab({ linear: 'absent' })).toBeNull();
     expect(tab({ repositoryStatus: 'failed' })).toBeNull();
   });
 
-  test('does not pick Linear while the folder is still searched', () => {
-    expect(tab({ repositoryStatus: 'pending', linearConnected: true })).toBeNull();
+  test('waits for the folder search and for Linear status before choosing', () => {
+    expect(tab({ repositoryStatus: 'pending', linear: 'connected' })).toBeNull();
+    expect(tab({ linear: 'pending' })).toBeNull();
   });
 });

@@ -51,7 +51,7 @@ import { SourceBoardAcrossNote } from './SourceBoardAcrossNote';
 import { SourceBoardChecksDialog } from './SourceBoardChecksDialog';
 import { SourceBoardLabels, SourceBoardReviewers } from './SourceBoardMetaEditors';
 import { SourceBoardProjectPicker, SourceBoardRepositoryPicker, SourceBoardTeamPicker } from './SourceBoardPickers';
-import { choiceForFocus, resolveBoardTab, shouldRememberAll, useBoardRepository } from './boardRepository';
+import { choiceForFocus, resolveBoardTab, shouldRememberAll, useBoardRepository, type BoardLinear } from './boardRepository';
 import { isSameRepositoryItemLink } from './openTrackerItem';
 import { usePullAttachments } from './pullAttachments';
 import { useThreadActions } from './threadActions';
@@ -194,12 +194,17 @@ const SourceBoard: React.FC<{ layout: SourceBoardLayout; onLeave?: () => void; o
     const hostProvider = useRepositoryHostProvider(allRepositories ? null : directory);
     const hasRepository = allRepositories !== null || hostProvider === 'github' || hostProvider === 'gitlab';
     const hasLinear = Boolean(linear);
-    const linearConnected = useLinearAuthStore((state) => state.status?.connected === true);
-    const linearPending = useLinearAuthStore((state) => hasLinear && state.status === null);
-    const tab = resolveBoardTab({ chosen: choice.tab, hasRepository, repositoryStatus: repository.status, hasLinear, linearConnected });
+    const linearStatus = useLinearAuthStore((state): BoardLinear => {
+        if (!hasLinear) return 'absent';
+        if (!state.status) return 'pending';
+        if (state.status.connected) return 'connected';
+        // The store leaves `hasChecked` false after a failed read.
+        return state.hasChecked ? 'disconnected' : 'unknown';
+    });
+    const tab = resolveBoardTab({ chosen: choice.tab, hasRepository, repositoryStatus: repository.status, linear: linearStatus });
 
     const linearWorkspaceId = useLinearAuthStore((state) => state.status?.organization?.id ?? '');
-    const mapping = useLinearMapping(tab === 'linear' && linearConnected, linearWorkspaceId);
+    const mapping = useLinearMapping(tab === 'linear' && linearStatus === 'connected', linearWorkspaceId);
     const teams = mapping?.teams ?? [];
     const linearTeamId = choice.linearTeamId && teams.some((team) => team.id === choice.linearTeamId) ? choice.linearTeamId : null;
 
@@ -260,7 +265,7 @@ const SourceBoard: React.FC<{ layout: SourceBoardLayout; onLeave?: () => void; o
                 ) : (
                     <div className="flex h-12 shrink-0 items-center gap-1 border-b border-border/60 px-2">{projectScope}</div>
                 )}
-                {repository.status === 'ready' && !linearPending ? (
+                {repository.status === 'ready' && linearStatus !== 'pending' ? (
                     <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center typography-meta text-muted-foreground">
                         <span>{t(projects.length === 0 ? 'sourceBoard.empty.noProjects' : 'sourceBoard.empty.noSource')}</span>
                         {projects.length > 0 ? (
