@@ -94,6 +94,11 @@ export const ProviderAuthMethodCards: React.FC<ProviderAuthMethodCardsProps> = (
   ] satisfies Array<CredentialMethod | null>)
     .filter((kind): kind is CredentialMethod => kind !== null)
     .filter((kind) => canAdd || credentials.some((credential) => credential.method === kind));
+  // Credentials OpenCode uses without storing them mark their own card, or the
+  // key card when the provider has no card of that kind.
+  const inUseKind = inUseWithoutCredential !== null && !kinds.includes(inUseWithoutCredential) && kinds.includes('key')
+    ? 'key'
+    : inUseWithoutCredential;
   // A single way to connect has nothing to choose between, so it starts open.
   const [openKinds, setOpenKinds] = React.useState<ReadonlySet<CredentialMethod>>(
     () => new Set(kinds.length === 1 ? kinds : []),
@@ -114,7 +119,7 @@ export const ProviderAuthMethodCards: React.FC<ProviderAuthMethodCardsProps> = (
     if (stored.some(connectionNeedsAuth)) {
       return { label: t('settings.providers.card.status.reauthNeeded'), tone: 'warning' };
     }
-    if (stored.some((credential) => credential.id === accounts?.activeId) || inUseWithoutCredential === kind) {
+    if (stored.some((credential) => credential.id === accounts?.activeId) || inUseKind === kind) {
       return { label: t('settings.providers.methods.status.inUse'), tone: 'success' };
     }
     if (stored.length > 0) return { label: t('settings.providers.methods.status.notInUse'), tone: 'neutral' };

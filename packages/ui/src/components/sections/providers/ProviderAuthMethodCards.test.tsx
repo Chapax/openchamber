@@ -44,6 +44,7 @@ const render = async (input: {
   credentials?: CredentialConnection[];
   activeId?: string | null;
   canAdd?: boolean;
+  inUseWithoutCredential?: CredentialConnection['method'] | null;
 }) => {
   const host = document.createElement('div');
   document.body.append(host);
@@ -68,6 +69,7 @@ const render = async (input: {
           onRemove: () => {},
         } : undefined}
         canAdd={input.canAdd ?? true}
+        inUseWithoutCredential={input.inUseWithoutCredential ?? null}
         connectKey={async () => {}}
         onKeySaved={() => {}}
         onSignedIn={() => {}}
@@ -178,4 +180,16 @@ test('enterprise mode keeps stored accounts and offers nothing new', async () =>
   expect(view.host.textContent).toContain('OpenCode Go');
   expect(view.button('Add account')).toBe(undefined);
   expect(view.keyField()).toBeNull();
+});
+
+test('a key OpenCode reads from the environment marks the key card in use', async () => {
+  const view = await render({ credentials: [], inUseWithoutCredential: 'key' });
+  expect(view.card('API key').textContent).toContain('In use');
+  expect(view.card('OpenCode Console account').textContent).toContain('Not connected');
+});
+
+test('machine credentials without a card of their kind mark the key card', async () => {
+  const view = await render({ signInMethods: [], credentials: [], inUseWithoutCredential: 'external' });
+  expect(view.cards().length).toBe(1);
+  expect(view.card('API key').textContent).toContain('In use');
 });

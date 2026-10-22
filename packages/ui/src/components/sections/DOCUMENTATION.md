@@ -103,9 +103,10 @@ adds another. Under a stored account that field or button waits behind "Add
 account": an empty key field under a key reads as "replace this key" and a bare
 Connect as "reconnect", while both add another account that becomes active. A
 provider with one kind starts with its card
-open. Keys from environment variables are listed above the cards, and a key
-OpenCode takes from the environment, the config or the server machine marks
-its card In use. In enterprise mode the cards keep the stored accounts and
+open. Keys from environment variables are listed above the cards. A key
+OpenCode takes from the environment or the config, or credentials on the
+server machine, mark their own card In use, or the key card when the provider
+has no card of that kind. In enterprise mode the cards keep the stored accounts and
 offer nothing new.
 
 The cards replaced a separate account list over an "Add account" panel that
