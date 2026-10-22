@@ -91,19 +91,32 @@ login, AWS profile for Bedrock) asks only its form and calls
 `integration.connect.external`, which stores a reference to credentials managed
 outside OpenCode; the account then lists as "External credentials".
 
-The ways to connect a provider, the API key and each sign-in method, show as
-collapsible cards (`providers/ProviderAuthMethodCards.tsx`, built on the
-Integrations page's `IntegrationCatalogCard`), on the connect page and behind
-"Add account". Each card names its method, says in one line how it works, and
-carries a pill: In use, Not in use or Not connected. Clicking a card opens its
-key field or sign-in button under it, and a provider with one way to connect
-starts with that card open. Stacked forms without cards read as steps to
+A provider's credentials show as one collapsible card per kind: API key,
+browser sign-in, credentials on the server machine
+(`providers/ProviderAuthMethodCards.tsx`, built on the Integrations page's
+`IntegrationCatalogCard`). The same cards serve the connect page and a
+connected provider's page, where they are always on screen. A card names its
+kind, says in one line how it works, and carries a pill: In use, Not in use,
+Sign in again or Not connected. Opened, it lists the stored accounts of its
+kind with their Use, Rename and Remove actions, then the field or button that
+adds another. Under a stored account that field or button waits behind "Add
+account": an empty key field under a key reads as "replace this key" and a bare
+Connect as "reconnect", while both add another account that becomes active. A
+provider with one kind starts with its card
+open. Keys from environment variables are listed above the cards, and a key
+OpenCode takes from the environment, the config or the server machine marks
+its card In use. In enterprise mode the cards keep the stored accounts and
+offer nothing new.
+
+The cards replaced a separate account list over an "Add account" panel that
+stacked the key form and the sign-in buttons. That panel read as steps to
 complete in order: people saved a key and then signed in as well, and only
-learned from "not in use" that one replaces the other. A stored credential
-records its kind (`key`, `oauth`, `external`) but not the sign-in method that
-made it, so every sign-in card of one kind shares a pill. Closing a card
-unmounts its body, which cancels a sign-in still waiting there, the same as
-its Cancel button.
+learned from "not in use" that one replaces the other, while the account list
+repeated what the pills now say. A stored credential records its kind (`key`,
+`oauth`, `external`) but not the sign-in method that made it, so the sign-in
+methods of one kind (OpenAI's ChatGPT and legacy Codex flows) share one card.
+Closing a card unmounts its body, which cancels a sign-in still waiting there,
+the same as its Cancel button.
 
 Vertex can sign in through Google Application Default Credentials on the server
 machine, which OpenCode neither stores nor reports as a connection. When
