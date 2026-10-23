@@ -9,7 +9,7 @@ The logo has four drawings, each for a kind of place:
 | Drawing | Where it shows |
 |---|---|
 | App icon, an Icon Composer document (`packages/electron/resources/icons/AppIcon.icon`) | macOS Dock and Finder, the iOS app. Its layers carry the six macOS appearances: Default, Dark, Clear and Tinted, light and dark |
-| Icon without a tile: dark cube, white edges, black outline | Windows, Linux, the VS Code Marketplace; on a black square for phone home screens, PWA and Android |
+| Icon without a tile: the open shell with a dark grey inside, white edges, black outline | Windows, Linux, the VS Code Marketplace; on a black square for phone home screens, PWA and Android |
 | In-app logo: the open shell in one colour | Every splash, About, sign-in, empty states, README |
 | Glyph: cube outline and two roof rings, one colour | macOS menu bar, favicon, VS Code activity bar and title buttons, model picker sprite, Android notification and themed icon, iOS Control Center |
 

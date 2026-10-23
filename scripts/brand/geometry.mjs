@@ -36,8 +36,6 @@ const SHELL_PATHS = [
   'M-41.568 -24 L-41.568 24 L0 48 L41.568 24 L41.568 -24',
   'M0 0 L0 48',
 ];
-const LEFT_WALL = 'M-41.568 -24 L-41.568 24 L0 48 L0 0 Z';
-const RIGHT_WALL = 'M41.568 -24 L41.568 24 L0 48 L0 0 Z';
 // Inner shading of the open shell: the triangles of the back walls a viewer
 // sees through the missing front walls.
 const LEFT_SHADE = 'M-41.568 -24 L-41.568 24 L0 0 Z';
@@ -119,24 +117,26 @@ export const flatLogoSvg = ({ color, size = 512 }) => (
 
 // ---------------------------------------------------------------------------
 // Icon without a tile: Windows, Linux, the VS Code Marketplace, and on a black
-// square for phone home screens. Dark cube, white edges, a thin black outer
-// outline so it reads on light and dark taskbars alike.
+// square for phone home screens. The open shell of the dark app icon: the
+// cube's inside is dark grey, the back walls and floor show through the open
+// front with the same shading, opaque grey tiers, white edges, and a thin
+// black outer outline so it reads on light and dark taskbars alike.
 
 const NO_TILE = {
   outline: '#000000',
-  leftWall: '#2b2c30',
-  rightWall: '#3a3b40',
-  roof: '#1d1e21',
+  inside: '#2a2b2f',
   tiers: ['#787a80', '#9fa1a6', '#d4d5d8'],
+  tierOpacity: 0.85,
   edge: '#f5f5f7',
 };
+const CUBE_SILHOUETTE = 'M0 -48 L41.568 -24 L41.568 24 L0 48 L-41.568 24 L-41.568 -24 Z';
 
 const noTileInner = () => (
-  `<path d="${OUTER_HEXAGON}" fill="none" stroke="${NO_TILE.outline}" stroke-width="3.1" stroke-linejoin="round"/>`
-  + `<path d="${LEFT_WALL}" fill="${NO_TILE.leftWall}"/>`
-  + `<path d="${RIGHT_WALL}" fill="${NO_TILE.rightWall}"/>`
-  + `<path d="${rhombus(1)}" fill="${NO_TILE.roof}"/>`
-  + TIER_SCALES.map((scale, i) => `<path d="${rhombus(scale)}" fill="${NO_TILE.tiers[i]}"/>`).join('')
+  `<defs>${wallGradients('nt-', 'white', 0.55)}${floorGradient('nt-f', 'white', 0.55)}</defs>`
+  + `<path d="${OUTER_HEXAGON}" fill="none" stroke="${NO_TILE.outline}" stroke-width="3.1" stroke-linejoin="round"/>`
+  + `<path d="${CUBE_SILHOUETTE}" fill="${NO_TILE.inside}"/>`
+  + `<path d="${LEFT_SHADE}" fill="url(#nt-l)"/><path d="${RIGHT_SHADE}" fill="url(#nt-r)"/><path d="${FLOOR_SHADE}" fill="url(#nt-f)"/>`
+  + TIER_SCALES.map((scale, i) => `<path d="${rhombus(scale)}" fill="${NO_TILE.tiers[i]}" fill-opacity="${NO_TILE.tierOpacity}"/>`).join('')
   + shellStrokes(NO_TILE.edge, 2.6)
 );
 
