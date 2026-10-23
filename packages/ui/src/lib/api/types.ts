@@ -938,7 +938,14 @@ export interface GitWorktreeInfo {
   name: string;
   branch: string;
   path: string;
+  /** The task's name: the first line of the branch description, when set. */
+  title?: string;
   provenance?: GitContributorWorktreeProvenance;
+}
+
+export interface GitWorktreeTitleResult {
+  title: string;
+  branch: string;
 }
 
 export interface GitContributorWorktreeProvenance {
@@ -1014,6 +1021,11 @@ export interface CreateGitWorktreePayload {
   changeRequestSource?: GitChangeRequestSourceRequest;
   /** Return once the target directory exists and finish Git worktree setup in the background. */
   returnAfterDirectoryCreated?: boolean;
+  /**
+   * The task title of a worktree made for a pull request or an issue: written
+   * as the agent's, so the agent can replace it with a short name.
+   */
+  taskTitle?: string;
 }
 
 export interface GitChangeRequestSourceRequest {
@@ -1104,6 +1116,8 @@ interface GitWorktreeAPI {
   preview?(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult>;
   create?(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult>;
   remove?(directory: string, payload: RemoveGitWorktreePayload): Promise<{ success: boolean }>;
+  /** Sets the task title of the worktree at `directory` as the user's; an empty title clears it. */
+  setTitle?(directory: string, title: string): Promise<GitWorktreeTitleResult>;
   /** `directory` is the worktree to snapshot. */
   snapshot?(directory: string, payload: GitWorktreeSnapshotPayload): Promise<GitWorktreeSnapshotResult>;
 }
