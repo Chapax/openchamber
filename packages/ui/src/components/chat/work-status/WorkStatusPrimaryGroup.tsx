@@ -34,6 +34,9 @@ import { useSourceControlProvider } from '@/lib/source-control/providers/registr
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
 import { useProjectActionsContext } from '@/hooks/useProjectActionsContext';
+import { useWaitingBlink } from '@/hooks/useDurationTicker';
+import { cn } from '@/lib/utils';
+import type { CISummary } from '@/lib/source-control/types';
 
 type Props = {
   sessionId: string | null;
@@ -51,6 +54,30 @@ type Props = {
 const formatPercent = (percent: number): string => `${Math.min(percent, 999).toFixed(1)}%`;
 /** Shown after a compaction, until a response reports how much the window holds. */
 const UNKNOWN_PERCENT = '\u2014';
+
+type PrChecks = Pick<CISummary, 'total' | 'success' | 'failure' | 'pending'>;
+
+const checksDotColor = (checks: PrChecks): string => {
+  if (checks.failure > 0) return 'var(--status-error)';
+  if (checks.pending > 0) return 'var(--status-warning)';
+  return 'var(--status-success)';
+};
+
+/**
+ * Passed out of all, after a dot in the run's colour, as GitHub's PR list shows
+ * checks. The per-state counts go in the row's tooltip. Lives in its own
+ * component so the dot's blink re-renders only itself.
+ */
+const PrChecksValue: React.FC<{ checks: PrChecks }> = ({ checks }) => {
+  const blink = useWaitingBlink(checks.pending > 0);
+  const color = checksDotColor(checks);
+  return (
+    <>
+      <span aria-hidden className={cn('size-1.5 shrink-0 rounded-full', blink)} style={{ backgroundColor: color }} />
+      <WorkStatusValue>{`${checks.success}/${checks.total}`}</WorkStatusValue>
+    </>
+  );
+};
 
 /**
  * The persistent readouts — how full the context is, what the working tree and
@@ -394,25 +421,12 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
                   ariaLabel={t(changeRequestCopy('chat.workStatus.action.openPr', prTerm))}
                   label={t('chat.workStatus.pr.checks')}
                   muted
-                  value={(
-                    <>
-                      {prSummary.checks.failure > 0 ? (
-                        <WorkStatusValue tone="error">
-                          {t('chat.workStatus.pr.checksFailed', { count: prSummary.checks.failure })}
-                        </WorkStatusValue>
-                      ) : null}
-                      {prSummary.checks.pending > 0 ? (
-                        <WorkStatusValue tone="warning">
-                          {t('chat.workStatus.pr.checksPending', { count: prSummary.checks.pending })}
-                        </WorkStatusValue>
-                      ) : null}
-                      {prSummary.checks.failure === 0 && prSummary.checks.pending === 0 ? (
-                        <WorkStatusValue tone="success">
-                          {t('chat.workStatus.pr.checksPassed', { count: prSummary.checks.success })}
-                        </WorkStatusValue>
-                      ) : null}
-                    </>
-                  )}
+                  tooltip={[
+                    prSummary.checks.failure > 0 ? t('chat.workStatus.pr.checksFailed', { count: prSummary.checks.failure }) : null,
+                    prSummary.checks.pending > 0 ? t('chat.workStatus.pr.checksPending', { count: prSummary.checks.pending }) : null,
+                    prSummary.checks.success > 0 ? t('chat.workStatus.pr.checksPassed', { count: prSummary.checks.success }) : null,
+                  ].filter(Boolean).join(' · ')}
+                  value={<PrChecksValue checks={prSummary.checks} />}
                 />
               ) : null}
             </>
