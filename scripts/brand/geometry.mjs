@@ -205,11 +205,20 @@ export const glyphInner = ({ color = 'currentColor', stroke = GLYPH_STROKE, wall
   + GLYPH.rings.map((d, i) => `<path d="${d}" fill="${color}" fill-opacity="${fmt(rings[i])}"/>`).join('')
 );
 
-export const glyphSvg = ({ size = 32, style = '', ...options } = {}) => (
-  `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 32 32">`
-  + style + glyphInner(options)
-  + '</svg>\n'
-);
+/** `zoom` enlarges the glyph inside its square, around the cube's centre. */
+export const glyphSvg = ({ size = 32, style = '', zoom = 1, ...options } = {}) => {
+  const side = 32 / zoom;
+  const view = zoom === 1 ? '0 0 32 32' : `${fmt(16 - side / 2)} ${fmt(16.25 - side / 2)} ${fmt(side)} ${fmt(side)}`;
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="${view}">`
+    + style + glyphInner(options)
+    + '</svg>\n'
+  );
+};
+
+// The menu bar slot is 18 pt; the old cube filled it edge to edge, and the
+// thinner glyph next to other menu bar icons looked small at the 32 grid.
+export const MENU_BAR_GLYPH_ZOOM = 1.05;
 
 /**
  * The glyph for an SF Symbol: symbols are one colour, so the two rings become

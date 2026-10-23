@@ -26,6 +26,7 @@ import {
   FLAT_TIER_OPACITY,
   FLAT_TIER_REST,
   GLYPH_UNSEEN_WALLS,
+  MENU_BAR_GLYPH_ZOOM,
   appIconDocument,
   appIconLayerSvgs,
   flatLogoInner,
@@ -161,7 +162,7 @@ const textOutputs = () => {
     [join(ELECTRON_ICONS, 'icon-win.svg'), noTileIconSvg()],
     [join(ELECTRON_ICONS, 'app-icon.svg'), noTileIconSvg()],
     [join(ELECTRON_ICONS, 'dev-icon-win.svg'), noTileIconSvg({ tape: true })],
-    [join(ELECTRON_ICONS, 'tray/tray-glyph.svg'), glyphSvg({ color: '#000000' })],
+    [join(ELECTRON_ICONS, 'tray/tray-glyph.svg'), glyphSvg({ color: '#000000', zoom: MENU_BAR_GLYPH_ZOOM })],
     [join(WEB_PUBLIC, 'favicon.svg'), glyphWithSchemeColors()],
     [join(WEB_PUBLIC, 'apple-touch-icon.svg'), noTileIconSvg({ size: 180, background: BLACK, cubeShare: 0.7 })],
     [join(WEB_PUBLIC, 'logo-dark-512x512.svg'), flatLogoSvg({ color: '#f5f5f7' })],
@@ -210,7 +211,7 @@ const imageOutputs = async () => {
   // macOS menu bar: template images, black with alpha.
   const tray = (name, options) => [18, 36].map(async (size) => put(
     join(ELECTRON_ICONS, 'tray', `trayTemplate-${name}${size === 36 ? '@2x' : ''}.png`),
-    await svgToPng(glyphSvg({ color: '#000000', ...options }), size),
+    await svgToPng(glyphSvg({ color: '#000000', zoom: MENU_BAR_GLYPH_ZOOM, ...options }), size),
   ));
   await Promise.all([
     ...tray('idle', {}),
