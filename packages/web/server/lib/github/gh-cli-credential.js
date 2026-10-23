@@ -8,8 +8,11 @@ const execFileAsync = promisify(execFile);
 
 // How long gh's answer is reused while its hosts.yml stays unchanged. The
 // hosts.yml check catches gh's own login changes at once; the limit covers a
-// token that changed where hosts.yml does not show it.
-const ANSWER_TTL_MS = 5 * 60_000;
+// token that changed where hosts.yml does not show it. "No token" is kept
+// briefly: gh exits non-zero for a locked keyring too, and unlocking it does
+// not touch hosts.yml.
+const TOKEN_TTL_MS = 5 * 60_000;
+const NO_TOKEN_TTL_MS = 30_000;
 
 const hostKeyFor = (host) => {
   const value = (host ?? '').trim().toLowerCase();
@@ -65,15 +68,17 @@ const lookups = new Map();
 
 /**
  * The gh CLI token for `host`, or null when gh has none or cannot be asked.
- * gh's answer is reused per host until hosts.yml changes, ANSWER_TTL_MS
- * passes, or GitHub refuses the token; concurrent callers share one gh run.
+ * gh's answer is reused per host until hosts.yml changes, TOKEN_TTL_MS
+ * (NO_TOKEN_TTL_MS for "no token") passes, or GitHub refuses the token;
+ * concurrent callers share one gh run.
  * Only an answer gh gave is reused: a failed run is asked again next time.
  */
 export async function getGhCliToken(host) {
   const hostKey = hostKeyFor(host);
   const stamp = await ghStateStamp();
   const answer = answers.get(hostKey);
-  if (answer && answer.stamp === stamp && Date.now() - answer.at < ANSWER_TTL_MS) return answer.token;
+  const ttl = answer?.token === null ? NO_TOKEN_TTL_MS : TOKEN_TTL_MS;
+  if (answer && answer.stamp === stamp && Date.now() - answer.at < ttl) return answer.token;
   const running = lookups.get(hostKey);
   if (running && running.stamp === stamp) return running.promise;
   const at = Date.now();

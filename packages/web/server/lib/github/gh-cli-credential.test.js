@@ -123,6 +123,25 @@ describe('gh CLI credential lookup', () => {
     expect(execFileMock).toHaveBeenCalledTimes(2);
   });
 
+  test('keeps "no token" for 30 s, so an unlocked keyring is seen soon', async () => {
+    const start = Date.now();
+    clock = spyOn(Date, 'now').mockReturnValue(start);
+    execFileMock
+      .mockImplementationOnce(failWith({ code: 1 }))
+      .mockImplementationOnce(answerWith('unlocked-token\n'));
+
+    expect(await getGhCliToken()).toBeNull();
+    clock.mockReturnValue(start + 29_000);
+    expect(await getGhCliToken()).toBeNull();
+    expect(execFileMock).toHaveBeenCalledTimes(1);
+    clock.mockReturnValue(start + 30_000);
+    expect(await getGhCliToken()).toBe('unlocked-token');
+    // A token, unlike "no token", stays past 30 s up to the 5 minute limit.
+    clock.mockReturnValue(start + 30_000 + 4 * 60_000);
+    expect(await getGhCliToken()).toBe('unlocked-token');
+    expect(execFileMock).toHaveBeenCalledTimes(2);
+  });
+
   test('asks gh again after GitHub refused the reused token', async () => {
     execFileMock
       .mockImplementationOnce(answerWith('refused-token\n'))
