@@ -107,8 +107,8 @@ const drawLine = (canvas, [x0, y0], [x1, y1], color) => {
   }
 };
 
-/** Raw RGBA pixels of the pixel-exact cube at `size` (16, 20 or 24). */
-export const pixelCube = (size) => {
+/** Raw RGBA pixels of the pixel-exact cube at `size` (16, 20 or 24); `tape` for a development copy. */
+export const pixelCube = (size, { tape = false } = {}) => {
   const spec = PIXEL_CUBES[size];
   if (!spec) throw new Error(`No pixel cube for ${size} px`);
   const { halfWidth: hw, wallHeight: h, tiers } = spec;
@@ -148,10 +148,25 @@ export const pixelCube = (size) => {
   for (let i = 0; i < art.data.length; i += 4) {
     if (art.data[i + 3]) out.data.set(art.data.subarray(i, i + 4), i);
   }
+  if (tape) drawPixelTape(out, size);
   return out.data;
 };
 
-export const pixelCubePng = (size) => sharp(Buffer.from(pixelCube(size)), { raw: { width: size, height: size, channels: 4 } })
+const TAPE_COLORS = { yellow: [0xd6, 0xa2, 0x3c], dark: [0x1b, 0x1b, 0x1b] };
+
+// The development-copy tape across the lower cube, full width: two-pixel
+// diagonal stripes, a quarter of the icon high.
+const drawPixelTape = (canvas, size) => {
+  const height = Math.round(size / 4);
+  const top = Math.round(size * 0.6);
+  for (let y = top; y < top + height; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      canvas.set(x, y, (x + y) % 4 < 2 ? TAPE_COLORS.yellow : TAPE_COLORS.dark);
+    }
+  }
+};
+
+export const pixelCubePng = (size, options) => sharp(Buffer.from(pixelCube(size, options)), { raw: { width: size, height: size, channels: 4 } })
   .png()
   .toBuffer();
 

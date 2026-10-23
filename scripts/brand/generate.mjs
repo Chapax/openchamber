@@ -199,14 +199,14 @@ const imageOutputs = async () => {
 
   // Windows and Linux: the icon without a tile; the .ico takes the pixel cube below 32 px.
   const noTile = noTileIconSvg();
-  const icoEntries = async (svg) => Promise.all([16, 20, 24, 32, 40, 48, 64, 128, 256].map(async (size) => ({
+  const icoEntries = async ({ tape }) => Promise.all([16, 20, 24, 32, 40, 48, 64, 128, 256].map(async (size) => ({
     size,
-    png: size <= 24 && svg === noTile ? await pixelCubePng(size) : await svgToPng(svg, size),
+    png: size <= 24 ? await pixelCubePng(size, { tape }) : await svgToPng(noTileIconSvg({ tape }), size),
   })));
   put(join(ELECTRON_ICONS, 'icon.png'), await svgToPng(noTile, 1024));
   put(join(ELECTRON_ICONS, 'app-icon.png'), await svgToPng(noTile, 512));
-  put(join(ELECTRON_ICONS, 'icon.ico'), encodeIco(await icoEntries(noTile)));
-  put(join(ELECTRON_ICONS, 'dev-icon.ico'), encodeIco(await icoEntries(noTileIconSvg({ tape: true }))));
+  put(join(ELECTRON_ICONS, 'icon.ico'), encodeIco(await icoEntries({ tape: false })));
+  put(join(ELECTRON_ICONS, 'dev-icon.ico'), encodeIco(await icoEntries({ tape: true })));
 
   // macOS menu bar: template images, black with alpha.
   const tray = (name, options) => [18, 36].map(async (size) => put(
