@@ -186,23 +186,26 @@ const GLYPH_SHELL = [
 const GLYPH_WALLS = 'M3.5 9.375 L16 16.25 L16 30 L3.5 23 Z M28.5 9.375 L16 16.25 L16 30 L28.5 23 Z';
 export const GLYPH_RING_OPACITY = [0.3, 0.75];
 
-export const GLYPH = {
-  shell: GLYPH_SHELL,
-  walls: GLYPH_WALLS,
-  rings: [rhombusRing(0.8, 0.58, GLYPH_FRAME), rhombusRing(0.58, 0.36, GLYPH_FRAME)],
-};
+// Two rings that only touch leave an anti-aliased seam between them, which
+// shows as a dark line once both are nearly opaque (the busy breath). So the
+// outer opacity is one band across both rings, and the inner ring is laid
+// over it with whatever opacity makes the two together reach its own.
+const GLYPH_BAND = rhombusRing(0.8, 0.36, GLYPH_FRAME);
+const GLYPH_INNER_RING = rhombusRing(0.58, 0.36, GLYPH_FRAME);
+const overlayOpacity = (base, target) => (base >= 1 ? 0 : 1 - (1 - target) / (1 - base));
 
 /**
  * Inner markup of the glyph on a 32 grid. `walls` fills the side walls (the
- * menu bar's "unread" state); `rings` overrides the ring opacities (the busy
- * breath).
+ * menu bar's "unread" state); `rings` overrides the outer and inner ring
+ * opacities (the busy breath).
  */
 export const glyphInner = ({ color = 'currentColor', stroke = GLYPH_STROKE, walls = 0, rings = GLYPH_RING_OPACITY } = {}) => (
   (walls ? `<path d="${GLYPH_WALLS}" fill="${color}" fill-opacity="${fmt(walls)}"/>` : '')
   + `<g fill="none" stroke="${color}" stroke-width="${stroke}" stroke-linejoin="round" stroke-linecap="round">`
   + GLYPH_SHELL.map((d) => `<path d="${d}"/>`).join('')
   + '</g>'
-  + GLYPH.rings.map((d, i) => `<path d="${d}" fill="${color}" fill-opacity="${fmt(rings[i])}"/>`).join('')
+  + `<path d="${GLYPH_BAND}" fill="${color}" fill-opacity="${fmt(rings[0])}"/>`
+  + `<path d="${GLYPH_INNER_RING}" fill="${color}" fill-opacity="${fmt(overlayOpacity(rings[0], rings[1]))}"/>`
 );
 
 /** `zoom` enlarges the glyph inside its square, around the cube's centre. */

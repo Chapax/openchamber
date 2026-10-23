@@ -16,9 +16,9 @@
     <path
         android:fillColor="#FFFFFFFF"
         android:fillAlpha="0.3"
-        android:pathData="M16 3.875 L26 9.375 L16 14.875 L6 9.375 Z M16 5.388 L8.75 9.375 L16 13.363 L23.25 9.375 Z" />
+        android:pathData="M16 3.875 L26 9.375 L16 14.875 L6 9.375 Z M16 6.9 L11.5 9.375 L16 11.85 L20.5 9.375 Z" />
     <path
         android:fillColor="#FFFFFFFF"
-        android:fillAlpha="0.75"
+        android:fillAlpha="0.643"
         android:pathData="M16 5.388 L23.25 9.375 L16 13.363 L8.75 9.375 Z M16 6.9 L11.5 9.375 L16 11.85 L20.5 9.375 Z" />
 </vector>
