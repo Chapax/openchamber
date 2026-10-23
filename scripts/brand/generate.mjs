@@ -297,14 +297,26 @@ const generate = async () => {
   // The icon sprite draws the glyph from geometry.mjs too.
   execFileSync('bun', ['run', at('scripts/generate-icon-sprite.mjs')], { stdio: 'inherit' });
 
-  if (process.platform === 'darwin') {
+  if (hasIconComposerTools()) {
     execFileSync('node', [at('packages/electron/scripts/generate-macos-icon-assets.cjs')], { stdio: 'inherit' });
     writeFile(join(ELECTRON_ICONS, 'dev-icon.png'), await macDevDockIcon());
     console.log('Wrote dev-icon.png.');
   } else {
-    console.log('Not on macOS: Assets.car, icon.icns and dev-icon.png were left as they are (they need Xcode).');
+    console.log('No Xcode 26 (actool and Icon Composer): Assets.car, icon.icns and dev-icon.png were left as they are.');
   }
   writeControlCenterSymbol();
+};
+
+// actool compiles the Icon Composer document; ictool, shipped with Icon
+// Composer in Xcode 26, renders it for the dev icon.
+const hasIconComposerTools = () => {
+  if (process.platform !== 'darwin' || !existsSync(ICTOOL)) return false;
+  try {
+    execFileSync('xcrun', ['--find', 'actool'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
 };
 
 // The iOS Control Center button needs a custom SF Symbol, built by swiftdraw

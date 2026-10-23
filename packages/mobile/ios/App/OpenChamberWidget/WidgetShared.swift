@@ -91,6 +91,8 @@ struct OverviewProvider: TimelineProvider {
 /// roof tiers that brighten towards the centre. Everything uses `.primary` at some opacity, so
 /// the system tint on the Lock Screen / Control Center keeps the layers apart. Coordinates are
 /// the SVG's (range x:-41.568…41.568, y:-48…48); the roof is centred on (0, -24).
+/// Hand-kept copy of the in-app logo in scripts/brand/geometry.mjs: brand:generate does not
+/// write it, so update it whenever that drawing changes.
 struct CubeLogoView: View {
     var body: some View {
         Canvas { context, size in

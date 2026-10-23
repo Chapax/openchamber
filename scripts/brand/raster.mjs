@@ -36,7 +36,7 @@ export const composeOnSquare = async ({ png, size, background, inset = 0, round 
 };
 
 // ---------------------------------------------------------------------------
-// Pixel-exact cube for 16-24 px (Windows .ico frames, Linux tray). Scaled-down
+// Pixel-exact cube for 16-24 px (Windows .ico frames, favicon-16). Scaled-down
 // vector art blurs there: the 30 degree edges fall between pixels. These use a
 // 2:1 slope, so every edge is a clean two-pixel staircase, with no
 // anti-aliasing and a 1 px black outline for light taskbars.
