@@ -145,9 +145,8 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
   // Archived worktrees live in each project's repository; read them each time
   // the page opens, like the spaces above.
   React.useEffect(() => {
-    if (layout !== 'page') return;
     for (const project of projects) void loadWorktreeArchives(project.path).catch(() => undefined);
-  }, [layout, projects]);
+  }, [projects]);
 
   // Sessions belong to their project the way the sidebar groups them: by
   // folder, then by OpenCode's project, which is what still places a session
@@ -305,73 +304,126 @@ export function ArchiveSessionsView({ layout, onLeave, initialQuery = '' }: {
   ) : null;
 
   if (layout === 'mobile') {
-    // One column: no directory panel, so every row names its project. Touch
-    // has no hover, so Restore is always visible. Deleting stays on desktop,
-    // whose confirmation dialog the mobile shell does not mount.
+    // The desktop's page in one column. Its groups (every session, each
+    // project, a deleted space's chats, everything else) become a row of
+    // chips that scrolls sideways; a project's archived worktrees are tiles
+    // holding their sessions above its loose ones. Touch has no hover, so
+    // Restore and a worktree's Delete are always shown. Deleting a session
+    // stays on the desktop, whose confirmation dialog the mobile shell does
+    // not mount.
+    const renderMobileSessionRow = (session: Session, index: number, rows: Session[], inTile: boolean) => {
+      const sessionDirectory = normalizePath(resolveGlobalSessionDirectory(session)) ?? '';
+      const title = session.title || t('sessions.sidebar.session.untitled');
+      // A deleted space's chat has nowhere to be restored to.
+      const restorable = !(spaceArchives?.has(sessionDirectory) ?? false);
+      const parentTitle = parentTitleAbove(rows, index);
+      // Only a list that mixes groups names each row's group.
+      const showGroup = selectedBucket === null || normalizedQuery.length > 0;
+      // In a worktree's tile the titles line up with the worktree's name, past its icon.
+      const indent = inTile ? (session.parentID ? 'ps-[2.875rem]' : 'ps-[2.125rem]') : (session.parentID ? 'ps-7' : 'ps-4');
+      return (
+        <React.Fragment key={session.id}>
+          {parentTitle ? (
+            <p dir="auto" className={cn('truncate oc-ui-start-align pt-2 pe-2 typography-micro text-muted-foreground', inTile ? 'ps-[2.125rem]' : 'ps-4')}>{parentTitle}</p>
+          ) : null}
+          <div className="flex items-center pe-1.5">
+            <button
+              type="button"
+              className={cn('flex min-h-10 min-w-0 flex-1 items-center py-1 pe-2 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset', indent)}
+              style={{ touchAction: 'manipulation' }}
+              onClick={() => openSession(session)}
+            >
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span dir="auto" className="block truncate oc-ui-start-align typography-ui-label text-foreground">{title}</span>
+                <span className="flex items-center gap-2.5 typography-micro text-muted-foreground">
+                  {showGroup ? <span className="block min-w-0 flex-1 truncate">{labelOf(sessionDirectory)}</span> : null}
+                  <span className="shrink-0 tabular-nums">
+                    {formatSessionDateLabel(session.time?.archived ?? session.time?.updated ?? session.time?.created ?? Date.now())}
+                  </span>
+                </span>
+              </span>
+            </button>
+            {restorable ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="lg"
+                className="w-10 shrink-0 px-0 text-muted-foreground"
+                onClick={() => restoreSession(session)}
+                aria-label={t('sessions.archivePage.restoreSessionAria', { title })}
+                style={{ touchAction: 'manipulation' }}
+              >
+                <Icon name="inbox-unarchive" className="size-5" />
+              </Button>
+            ) : null}
+          </div>
+        </React.Fragment>
+      );
+    };
+    const renderChip = (key: string, label: string, count: number, selected: boolean, onSelect: () => void, fromDeletedSpace = false) => (
+      <Button
+        key={key}
+        type="button"
+        variant="chip"
+        size="sm"
+        className="shrink-0"
+        aria-pressed={selected}
+        onClick={onSelect}
+        style={{ touchAction: 'manipulation' }}
+      >
+        {fromDeletedSpace ? <Icon name="box-3" className="size-3.5" /> : null}
+        <span className="max-w-40 truncate">{label}</span>
+        <span className="tabular-nums text-muted-foreground">{count}</span>
+      </Button>
+    );
     return (
       <div className="flex h-full min-h-0 flex-col">
-        <div className="shrink-0 space-y-1.5 px-3 pt-3">
-          {searchInput}
+        <div className="shrink-0 space-y-2 pt-3">
+          <div className="px-3">{searchInput}</div>
+          {/* Groups filter while not searching; a search spans them all. */}
+          {!normalizedQuery && buckets.length > 0 ? (
+            <div className="flex gap-1.5 overflow-x-auto px-3 pb-0.5 [scrollbar-width:none]">
+              {renderChip('__all__', t('sessions.archivePage.all'), totalCount, selectedKey === null, () => selectBucket(null))}
+              {buckets.map((bucket) => renderChip(
+                bucket.key,
+                bucket.label,
+                bucket.sessions.length,
+                selectedKey === bucket.key,
+                () => selectBucket(bucket.key),
+                bucket.kind === 'space',
+              ))}
+            </div>
+          ) : null}
           {totalCount > 0 || sessionsStatus === 'ready' ? (
-            <p className="px-1 typography-micro text-muted-foreground">{countLabel}</p>
+            <p className="px-4 typography-micro text-muted-foreground">{countLabel}</p>
           ) : null}
         </div>
         <div
           className="min-h-0 flex-1 overflow-y-auto pt-1"
           style={{ paddingBottom: 'calc(0.5rem + var(--oc-safe-area-bottom, 0px))' }}
         >
-          {visibleSessions.length === 0 ? emptyState : visibleSessions.map((session, index) => {
-            const sessionDirectory = normalizePath(resolveGlobalSessionDirectory(session)) ?? '';
-            const title = session.title || t('sessions.sidebar.session.untitled');
-            // A deleted space's chat has nowhere to be restored to.
-            const restorable = !(spaceArchives?.has(sessionDirectory) ?? false);
-            const parentTitle = parentTitleAbove(visibleSessions, index);
-            return (
-              <React.Fragment key={session.id}>
-                {parentTitle ? (
-                  <p dir="auto" className="truncate oc-ui-start-align px-4 pt-2 typography-micro text-muted-foreground">{parentTitle}</p>
-                ) : null}
-                <div className="flex items-center pe-1.5">
-                  <button
-                    type="button"
-                    className={cn(
-                      'flex min-h-10 min-w-0 flex-1 items-center py-1 pe-2 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
-                      session.parentID ? 'ps-7' : 'ps-4',
-                    )}
-                    style={{ touchAction: 'manipulation' }}
-                    onClick={() => openSession(session)}
-                  >
-                    <span className="flex min-w-0 flex-1 flex-col">
-                      <span dir="auto" className="block truncate oc-ui-start-align typography-ui-label text-foreground">
-                        {title}
-                      </span>
-                      <span className="flex items-center gap-2.5 typography-micro text-muted-foreground">
-                        <span className="block min-w-0 flex-1 truncate">{labelOf(sessionDirectory)}</span>
-                        <span className="shrink-0 tabular-nums">
-                          {formatSessionDateLabel(session.time?.archived ?? session.time?.updated ?? session.time?.created ?? Date.now())}
-                        </span>
-                      </span>
-                    </span>
-                  </button>
-                  {restorable ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="lg"
-                      className="w-10 shrink-0 px-0 text-muted-foreground"
-                      onClick={() => restoreSession(session)}
-                      aria-label={t('sessions.archivePage.restoreSessionAria', { title })}
-                      style={{ touchAction: 'manipulation' }}
-                    >
-                      <Icon name="inbox-unarchive" className="size-5" />
-                    </Button>
-                  ) : null}
+          {worktreeGroups.length > 0 ? (
+            <div className={cn('space-y-2 px-3', visibleSessions.length > 0 && 'pb-3')}>
+              {worktreeGroups.map(({ archive, sessions: groupSessions }) => (
+                <div key={archive.id} className="oc-tile rounded-lg p-1">
+                  <ArchivedWorktreeRow
+                    archive={archive}
+                    busy={archiveActions.busyIds.has(archive.id)}
+                    touch
+                    onRestore={() => { if (selectedProject) void archiveActions.restore(selectedProject, archive); }}
+                    onDelete={() => { if (selectedProject) void archiveActions.remove(selectedProject, archive); }}
+                  />
+                  {groupSessions.map((session, index) => renderMobileSessionRow(session, index, groupSessions, true))}
                 </div>
-              </React.Fragment>
-            );
-          })}
+              ))}
+            </div>
+          ) : null}
+          {visibleSessions.length === 0 && worktreeGroups.length === 0
+            ? emptyState
+            : visibleSessions.map((session, index) => renderMobileSessionRow(session, index, visibleSessions, false))}
           {showMoreButton}
         </div>
+        {archiveActions.dialog}
       </div>
     );
   }
