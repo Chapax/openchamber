@@ -1,6 +1,5 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
-import { toast } from '@/components/ui';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,32 +26,21 @@ import { FileTreeChevron } from '@/components/views/files/FileTreeRowParts';
 import { handleSessionRenameKeyDown } from '@/components/session/sessionRenameKeyboard';
 import { useOpenTrackerItem } from '@/components/sourceBoard/openTrackerItem';
 import { useShiftKeyHeld } from '@/hooks/useShiftKeyHeld';
-import { canArchiveWorktrees, setGitWorktreeTitle } from '@/lib/gitApi';
 import { useI18n } from '@/lib/i18n';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { refTintStyle } from '@/lib/source-control/prVisualState';
 import { cn } from '@/lib/utils';
-import { useWorktreeRemoving } from '@/lib/worktrees/worktreeRemovalState';
-import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
-import { useSessionDraftsStore } from '@/stores/useSessionDraftsStore';
-import { useUIStore } from '@/stores/useUIStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
 import { DirectoryActionIndicator } from '../sessions/DirectoryActionIndicator';
 import { CollapsedActivityIndicator } from '../sessions/collapsedActivityIndicator';
-import { useCollapsedSessionActivityState } from '../sessions/collapsedActivityState';
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
-import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
-import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
-import { isSessionUnread } from '@/sync/session-unread';
 import { SIDEBAR_REF_TOOLTIP_CLOSE_DELAY_MS, SidebarRefLinks } from '../sessions/SidebarRefLinks';
 import { RowMarkTooltip } from '../sessions/RowMarkTooltip';
 import { TimelineProjectIcon } from '../sessions/SessionTimelineRowBody';
 import { sessionDetailedRowPaddingLeft, sessionTreeRowPaddingLeft } from '../sessions/sessionTreeGeometry';
-import { useGroupRefs } from '../projects/useGroupRefs';
 import type { SessionGroup } from '../types';
-import { formatProjectLabel, isPathWithinProject, normalizePath, renderHighlightedText } from '../utils';
-import { collectWorkSessions, finishWorktreeWork, isWorkInWork, pickWorkSessionToOpen, trackWork } from './workActions';
+import { normalizePath, renderHighlightedText } from '../utils';
+import { useWorktreeWork } from './useWorktreeWork';
 import { worktreeFolderMemberId } from './sidebarWorks';
 
 const NO_FOLDERS: never[] = [];
@@ -80,7 +68,6 @@ const CONTEXT_MENU_SLOTS: WorkMenuSlots = {
   SubTrigger: ContextMenuSubTrigger,
   SubContent: ContextMenuSubContent,
 };
-const CURRENT_SESSION = '\u0000session';
 
 type Props = {
   group: SessionGroup;
@@ -98,10 +85,7 @@ type Props = {
   alwaysShowActions: boolean;
   mobileVariant: boolean;
   onToggle: (groupKey: string) => void;
-  openNewSessionDraft: (options?: { selectedProjectId?: string | null; directoryOverride?: string | null }) => void;
-  setActiveProjectIdOnly: (id: string) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
-  activeProjectId: string | null;
 };
 
 /**
@@ -128,43 +112,24 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
     alwaysShowActions,
     mobileVariant,
     onToggle,
-    openNewSessionDraft,
-    setActiveProjectIdOnly,
     setSessionSwitcherOpen,
-    activeProjectId,
   } = props;
   const { t } = useI18n();
   const openTrackerItem = useOpenTrackerItem();
   const shiftHeld = useShiftKeyHeld();
-  const worktree = group.worktree;
-  const directory = normalizePath(group.directory ?? null);
-  const worktreeRemoving = useWorktreeRemoving(worktree ? worktree.path : null);
-  const sessions = React.useMemo(() => collectWorkSessions(group.sessions), [group.sessions]);
-  const project = useProjectsStore(React.useCallback(
-    (state) => projectId ? state.projects.find((entry) => entry.id === projectId) ?? null : null,
-    [projectId],
-  ));
-  const projectLabel = project ? formatProjectLabel(project.label?.trim() || project.path) : null;
-  const refs = useGroupRefs(group, sessions, true);
-  const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
-  const inWork = sessionWorkEnabled && isWorkInWork(sessions);
-  // Where the user is: the open session (`CURRENT_SESSION`) or the open
-  // draft (its id, '' before it has one) in this worktree; null elsewhere.
-  const current = useSessionUIStore((state): string | null => {
-    if (state.currentSessionId) return sessions.some((session) => session.id === state.currentSessionId) ? CURRENT_SESSION : null;
-    if (!state.newSessionDraft.open || !isPathWithinProject(state.newSessionDraft.directoryOverride, directory)) return null;
-    return state.newSessionDraft.workDraftId ?? '';
+  const work = useWorktreeWork({
+    group,
+    projectId,
+    collapsed,
+    onNavigate: () => {
+      if (mobileVariant) setSessionSwitcherOpen(false);
+    },
   });
-  // A draft with nothing in it yet has no row of its own.
-  const openDraftHasRow = useSessionDraftsStore((state) => (
-    Boolean(current) && current !== CURRENT_SESSION && state.drafts.some((draft) => draft.id === current)
-  ));
-  // A run's overview covers the session, and then the run's row is the selected one.
-  const runOverviewOpen = useUIStore((state) => state.runOverviewKey !== null);
-  const isCurrent = current !== null && !runOverviewOpen;
-  // The work's row is selected while nothing under it shows the selection:
-  // folded, or on a draft that has no row yet (a worktree just made).
-  const selected = isCurrent && (collapsed || (current !== CURRENT_SESSION && !openDraftHasRow));
+  const {
+    worktree, directory, worktreeRemoving, sessions, project, projectLabel, refs, selected,
+    title, branch, label, finishing, canArchive, workAction, inWork, activityState,
+    runningSessionId, durationSessionId,
+  } = work;
   // Folders of the project root can hold whole worktrees, filed by member id.
   const folderScopeKey = normalizePath(project?.path ?? null);
   const folderMemberId = worktreeFolderMemberId(directory);
@@ -188,39 +153,15 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
     return () => cancelAnimationFrame(frame);
   }, [renaming]);
   const [renameDraft, setRenameDraft] = React.useState('');
-  const [finishing, setFinishing] = React.useState(false);
-
-  const title = worktree?.title?.trim() || null;
-  const branch = group.branch?.trim() || worktree?.branch?.trim() || null;
-  // Until the task is named, the row reads as the session a click opens:
-  // the task in the user's words. The branch is the last resort and the
-  // tooltip's second line.
-  const sessionToOpen = React.useMemo(() => pickWorkSessionToOpen(group.sessions), [group.sessions]);
-  const label = title ?? (sessionToOpen?.title?.trim() || null) ?? branch ?? group.label;
   const expandable = !empty;
   const expanded = forceExpanded || !collapsed;
 
-  const prepare = (): void => {
-    // Leaves a full-page surface (a run's overview, Archive), as selecting a
-    // session row does, even when the session is already the current one.
-    useUIStore.getState().closeMainSurfaces();
-    if (projectId && projectId !== activeProjectId) setActiveProjectIdOnly(projectId);
-    if (mobileVariant) setSessionSwitcherOpen(false);
-  };
   const openWork = (): void => {
-    if (renaming) return;
-    prepare();
-    const session = sessionToOpen;
-    if (session) {
-      useSessionUIStore.getState().setCurrentSession(session.id, session.directory ?? directory);
-      return;
-    }
-    openNewSessionDraft({ selectedProjectId: projectId, directoryOverride: group.directory });
+    if (!renaming) work.open();
   };
   const newChat = (event: React.MouseEvent): void => {
     event.stopPropagation();
-    prepare();
-    openNewSessionDraft({ selectedProjectId: projectId, directoryOverride: group.directory });
+    work.newChat();
   };
   const startRename = (): void => {
     setRenameDraft(title ?? '');
@@ -228,75 +169,19 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
   };
   const saveRename = async (): Promise<void> => {
     setRenaming(false);
-    if (!group.directory || renameDraft.trim() === (title ?? '')) return;
-    try {
-      await setGitWorktreeTitle(group.directory, renameDraft.trim());
-    } catch (error) {
-      toast.error(t('sessions.sidebar.work.rename.failed'), { description: error instanceof Error ? error.message : undefined });
-    }
+    await work.saveTitle(renameDraft);
   };
-  // Archive and Done both end the work: in-work sessions are marked done. Archive
-  // always archives the worktree; Done only when the user turned that on. VS
-  // Code keeps its own list, without archives.
-  const canArchive = canArchiveWorktrees();
-  const archiveOnDone = useUIStore((state) => state.worktreeArchiveOnDoneEnabled);
-  const finish = async (archive: boolean): Promise<void> => {
-    if (!worktree || !project || finishing) return;
-    setFinishing(true);
-    try {
-      const outcome = await finishWorktreeWork({ sessions, worktree, project: { id: project.id, path: project.path }, title: label, archive: archive && canArchive });
-      switch (outcome.kind) {
-        case 'done':
-          break;
-        case 'archived':
-          toast.success(t('sessions.sidebar.work.archive.done'), { description: label });
-          break;
-        case 'busy':
-          toast.info(t('sessions.sidebar.work.archive.kept'), { description: t('sessions.sidebar.work.archive.keptRunning') });
-          break;
-        case 'unknown':
-          toast.info(t('sessions.sidebar.work.archive.kept'), { description: t('sessions.sidebar.work.archive.keptUnknown') });
-          break;
-        case 'failed':
-          toast.error(outcome.doneFailed > 0 ? t('sessions.sidebar.work.done.failed') : t('sessions.sidebar.work.archive.failed'), {
-            description: outcome.error.message,
-          });
-          break;
-      }
-    } finally {
-      setFinishing(false);
-    }
-  };
-  const shiftArchive = shiftHeld && canArchive && Boolean(worktree) && !worktreeRemoving;
+  const finish = work.finish;
+  const shiftArchive = shiftHeld && canArchive;
   const toggleWork = (event: React.MouseEvent): void => {
     event.stopPropagation();
-    if (inWork) {
-      void finish(archiveOnDone);
-      return;
-    }
-    const session = sessionToOpen;
-    if (!session) return;
-    void trackWork(session).catch(() => toast.error(t('sessions.sidebar.work.track.failed')));
+    work.toggleWork();
   };
   const deleteWorktree = (event: { shiftKey?: boolean }): void => {
     if (!worktree) return;
     sessionEvents.requestDelete({ sessions, mode: 'worktree', worktree, skipDialogIfSafe: shiftHeld || event.shiftKey === true });
   };
 
-  // Its sessions' live state, as a session row shows its own: in the slot,
-  // in place of the worktree mark, with the turn's duration at the end.
-  const activityState = useCollapsedSessionActivityState({ nodes: group.sessions });
-  const workSessionIds = React.useMemo(() => sessions.flatMap((session) => (session.parentID ? [] : [session.id])), [sessions]);
-  const runningSessionId = useGlobalSessionStatusStore(React.useCallback((state) => (
-    workSessionIds.find((id) => {
-      const status = state.statusById.get(id)?.status.type;
-      return status === 'busy' || status === 'retry';
-    }) ?? null
-  ), [workSessionIds]));
-  const unreadSessionId = useGlobalSessionsStore(React.useCallback((state) => (
-    workSessionIds.find((id) => isSessionUnread(state.entityById.get(id))) ?? null
-  ), [workSessionIds]));
-  const durationSessionId = runningSessionId ?? unreadSessionId;
   const stateMark = worktreeRemoving || finishing
     ? <Spinner className="h-3.5 w-3.5" />
     : activityState ? <CollapsedActivityIndicator state={activityState} /> : null;
@@ -420,7 +305,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
   const tooltipLinks = refs.prSummary ? refs.prLinks : refs.issueItems;
   // Hover actions cross-fade over the meta at the row's end; the title's
   // tail fades under them (`oc-actions-mask`), so nothing moves.
-  const hasWorkAction = sessionWorkEnabled && (inWork || sessions.length > 0);
+  const hasWorkAction = workAction;
   const actionsReserve = hasWorkAction ? '[--oc-actions-reserve:2.875rem]' : '[--oc-actions-reserve:1.75rem]';
   const hideOnHover = alwaysShowActions ? undefined : 'transition-opacity group-hover/work:opacity-0 group-has-[:focus-visible]/work:opacity-0';
   const maskOnHover = alwaysShowActions ? undefined : 'group-hover/work:oc-actions-mask group-has-[:focus-visible]/work:oc-actions-mask';
@@ -631,7 +516,7 @@ export function WorktreeWorkRow(props: Props): React.ReactNode {
           alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/work:opacity-100 group-has-[:focus-visible]/work:opacity-100 has-[[data-popup-open]]:opacity-100',
         )}>
           <TooltipProvider delayDuration={400}>
-            {sessionWorkEnabled && (inWork || sessions.length > 0) ? (
+            {workAction ? (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button

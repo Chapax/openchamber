@@ -17,6 +17,17 @@ describe('useSessionDisplayStore worktree sorting', () => {
   });
 });
 
+describe('useSessionDisplayStore detailed rows', () => {
+  test('v12 keeps two lines for a phone that was on List', () => {
+    expect(migrateSessionDisplayState({ sidebarViewMode: 'timeline', detailedZoneRows: false }, 11, 'mobile').detailedZoneRows).toBe(true);
+  });
+
+  test('v12 keeps a phone on Tree and every computer as they were', () => {
+    expect(migrateSessionDisplayState({ sidebarViewMode: 'projects', detailedZoneRows: false }, 11, 'mobile').detailedZoneRows).toBe(false);
+    expect(migrateSessionDisplayState({ sidebarViewMode: 'timeline', detailedZoneRows: false }, 11, 'desktop').detailedZoneRows).toBe(false);
+  });
+});
+
 describe('useSessionDisplayStore project sorting', () => {
   test('defaults to manual ordering', () => {
     expect(useSessionDisplayStore.getState().projectSortOrder).toBe('manual');
@@ -110,7 +121,7 @@ describe('useSessionDisplayStore animated activity', () => {
       await useSessionDisplayStore.persist.rehydrate();
       expect(useSessionDisplayStore.getState().animatedActivityIndicators).toBe(false);
       expect(useSessionDisplayStore.getState().sidebarViewMode).toBe('timeline');
-      expect(useSessionDisplayStore.persist.getOptions().version).toBe(11);
+      expect(useSessionDisplayStore.persist.getOptions().version).toBe(12);
       useSessionDisplayStore.getState().setAnimatedActivityIndicators(true);
       const enabledSnapshot = stored;
       useSessionDisplayStore.setState({ animatedActivityIndicators: false });

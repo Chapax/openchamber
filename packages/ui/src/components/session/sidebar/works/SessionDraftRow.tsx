@@ -1,20 +1,15 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
-import { toast } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
-import { useSessionDraftsStore, type SessionDraft } from '@/stores/useSessionDraftsStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useUIStore } from '@/stores/useUIStore';
-import { clearChatDraft, createChatDraftIdentity, workDraftComposerKey } from '@/lib/chatDraftPersistence';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import type { SessionDraft } from '@/stores/useSessionDraftsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useGitBranchLabel } from '@/stores/useGitStore';
 import { formatProjectLabel } from '../utils';
 import { TimelineProjectIcon } from '../sessions/SessionTimelineRowBody';
 import { sessionDetailedRowPaddingLeft, sessionTreeRowPaddingLeft } from '../sessions/sessionTreeGeometry';
-import { openSessionDraft } from './openSessionDraft';
+import { useSessionDraftRow } from './useSessionDraftRow';
 
 type Props = {
   draft: SessionDraft;
@@ -38,39 +33,18 @@ type Props = {
  */
 export function SessionDraftRow({ draft, depth, detailed, mixed, alwaysShowActions, mobileVariant, setSessionSwitcherOpen }: Props): React.ReactNode {
   const { t } = useI18n();
-  // The draft in the composer right now: its row is the selected one.
-  const isOpen = useSessionUIStore((state) => (
-    !state.currentSessionId && state.newSessionDraft.open && state.newSessionDraft.workDraftId === draft.id
-  ));
+  const { isOpen, firstLine, attachmentCount, label, open, discard: discardDraft } = useSessionDraftRow(draft, () => {
+    if (mobileVariant) setSessionSwitcherOpen(false);
+  });
   const project = useProjectsStore(React.useCallback(
     (state) => (detailed && mixed && draft.projectId ? state.projects.find((entry) => entry.id === draft.projectId) ?? null : null),
     [detailed, mixed, draft.projectId],
   ));
   // Known once the directory's git status has been read; the line keeps its height without it.
   const branch = useGitBranchLabel(detailed ? draft.directory : null);
-  const firstLine = draft.text.split(/\r?\n/).find((line) => line.trim())?.trim() ?? '';
-  const attachmentCount = draft.attachments.length;
-  const label = firstLine || (attachmentCount === 1
-    ? t('sessions.sidebar.draft.attachmentsSingle', { count: attachmentCount })
-    : t('sessions.sidebar.draft.attachmentsPlural', { count: attachmentCount }));
-  const open = (): void => {
-    // Leaves a full-page surface (a run's overview, Archive) as a session row does.
-    useUIStore.getState().closeMainSurfaces();
-    if (isOpen) return;
-    if (mobileVariant) setSessionSwitcherOpen(false);
-    void openSessionDraft(draft).then((complete) => {
-      if (!complete) toast.error(t('sessions.sidebar.draft.attachmentsMissing'));
-    });
-  };
   const discard = (event: React.MouseEvent): void => {
     event.stopPropagation();
-    void useSessionDraftsStore.getState().discard(draft.id, { final: true }).catch(() => toast.error(t('sessions.sidebar.draft.discardFailed')));
-    if (!isOpen) return;
-    // Thrown away while in the composer: its text goes too, and the composer
-    // starts a fresh draft in the same place.
-    const identity = createChatDraftIdentity(getRuntimeKey(), draft.directory, workDraftComposerKey(draft.id));
-    if (identity) clearChatDraft(identity);
-    useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: draft.projectId ?? undefined, directoryOverride: draft.directory });
+    discardDraft();
   };
 
   return (

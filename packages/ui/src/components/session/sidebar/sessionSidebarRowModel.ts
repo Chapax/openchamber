@@ -19,7 +19,7 @@ export type SessionSidebarActivityItem = {
   blockingBadgeSessionScopes?: readonly BlockingBadgeSessionScope[];
   projectId: string | null;
   groupDirectory: string | null;
-  secondaryMeta: { projectLabel?: string | null; branchLabel?: string | null } | null;
+  secondaryMeta: { projectLabel?: string | null; branchLabel?: string | null; inSpace?: boolean } | null;
   getSecondaryMeta?: (sessionId: string) => SessionSidebarActivityItem['secondaryMeta'];
   /** Search matches in the session's whole tree, for zone rows whose node drops its children. */
   searchMatchCount?: number;
@@ -174,6 +174,14 @@ type RunEntry = { run: MultiRunSummary; lanes: SessionNode[] };
 type SidebarEntry = SessionNode | RunEntry;
 
 const isRunEntry = (entry: SidebarEntry): entry is RunEntry => 'run' in entry;
+
+/**
+ * The `expandedParents` key of a session row: per render context, so the same
+ * session listed in a project and in In work opens in one place only.
+ */
+export const sessionExpansionKey = (renderContext: SessionSidebarRenderContext, archived: boolean, sessionId: string): string => (
+  `${renderContext}:${archived ? 'archived' : 'active'}:${sessionId}`
+);
 
 export const runExpansionKey = (renderContext: SessionSidebarRenderContext, runKey: string): string => (
   `${renderContext}:active:run:${runKey}`

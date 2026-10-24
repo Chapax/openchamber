@@ -41,7 +41,7 @@ import { useSessionSidebarSections } from '../projects/useSessionSidebarSections
 import { SessionPrefetchProvider } from './useSessionPrefetch';
 import { isPathWithinProject, normalizePath } from '../utils';
 import type { SessionGroup, SessionNode } from '../types';
-import { SessionProjectScroller } from '../projects/SessionProjectScroller';
+import { SessionProjectScroller, type SessionProjectListProps } from '../projects/SessionProjectScroller';
 import { useSessionGrouping } from '../projects/useSessionGrouping';
 import { SessionBulkActions } from '../folders/SessionBulkActions';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
@@ -134,6 +134,8 @@ type SessionProjectCollectionProps = {
      * than recomputed there, so the number and the rows can never disagree.
      */
     onSearchMatchCountChange: (count: number) => void;
+    /** Draws the list in place of the desktop's scroller: the phone's rows over the same model. */
+    renderList?: (props: SessionProjectListProps) => React.ReactNode;
   };
   actions: {
     rowActions: {
@@ -1133,7 +1135,9 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
         }}
         onPointerLeave={() => setHeldProjectOrder(null)}
       >
-        <SessionProjectScroller model={scrollerModel} view={scrollerView} actions={scrollerActionSet} />
+        {view.renderList
+          ? view.renderList({ model: scrollerModel, view: scrollerView, actions: scrollerActionSet })
+          : <SessionProjectScroller model={scrollerModel} view={scrollerView} actions={scrollerActionSet} />}
       </div>
     </SessionRowOrderProvider>
     </SessionPrefetchProvider>

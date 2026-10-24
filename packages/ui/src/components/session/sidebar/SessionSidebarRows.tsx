@@ -55,6 +55,10 @@ type Props = {
   pinnedRowIndexes: ReadonlySet<number>;
   renderRow: (row: SessionSidebarRow, index: number) => React.ReactNode;
   onFirstVisibleIndexChange: (index: number) => void;
+  /** Where a level 0 row's slot starts, for the tree guides: the phone's rows sit further in. */
+  guideSlotStartPx?: number;
+  /** Brings a row to the middle of the list; a new `id` asks again for the same row. */
+  scrollRequest?: { index: number; id: number } | null;
 };
 
 export function SessionSidebarRows({
@@ -63,6 +67,8 @@ export function SessionSidebarRows({
   pinnedRowIndexes,
   renderRow,
   onFirstVisibleIndexChange,
+  guideSlotStartPx = SESSION_TREE_BASE_PADDING_PX,
+  scrollRequest = null,
 }: Props): React.ReactNode {
   const rows = model.rows;
   const getScrollElement = React.useCallback(() => scrollElement, [scrollElement]);
@@ -130,6 +136,12 @@ export function SessionSidebarRows({
   React.useLayoutEffect(() => {
     onFirstVisibleIndexChange(firstVisibleIndex);
   }, [firstVisibleIndex, onFirstVisibleIndexChange]);
+
+  React.useEffect(() => {
+    if (scrollRequest && scrollElement) virtualizer.scrollToIndex(scrollRequest.index, { align: 'center' });
+    // Asked once per request: the rows changing under it must not scroll again.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [scrollRequest, scrollElement]);
 
   const containerRef = React.useRef<HTMLDivElement>(null);
   const lastLayoutRef = React.useRef<{ rows: readonly SessionSidebarRow[]; measurements: readonly VirtualItem[] } | null>(null);
@@ -226,7 +238,7 @@ export function SessionSidebarRows({
   const renderRowWithGuides = (row: SessionSidebarRow, index: number): React.ReactNode => (row.treeGuides
     ? <div className="relative flow-root">
       {renderRow(row, index)}
-      <SessionTreeGuides guides={row.treeGuides} slotStartPx={SESSION_TREE_BASE_PADDING_PX} />
+      <SessionTreeGuides guides={row.treeGuides} slotStartPx={guideSlotStartPx} />
     </div>
     : renderRow(row, index));
 

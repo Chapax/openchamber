@@ -382,13 +382,12 @@ const NEW_CHAT_DRAFT_DIRECTORY = CHAT_DRAFT_PROJECT_ID;
 
 /**
  * The composer key of the open project draft (see `workDraftComposerKey`), or
- * null for a new Chat. The desktop and web sidebar list drafts; VS Code has no
- * shared drafts and the phone does not list them yet, so both keep the
- * per-folder key, where a new draft finds the text left in that folder.
+ * null for a new Chat. The sidebars of the desktop, the web and the phone list
+ * drafts; VS Code has no shared drafts, so it keeps the per-folder key, where
+ * a new draft finds the text left in that folder.
  */
 const resolveWorkDraftComposerKey = (draft: NewSessionDraftState | null | undefined): string | null => {
-    const surface = getSettingsSurface();
-    return draft?.open && draft.target === 'project' && draft.workDraftId && (surface === 'desktop' || surface === 'web')
+    return draft?.open && draft.target === 'project' && draft.workDraftId && getSettingsSurface() !== 'vscode'
         ? workDraftComposerKey(draft.workDraftId)
         : null;
 };

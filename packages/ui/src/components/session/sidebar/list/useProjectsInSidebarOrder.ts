@@ -37,15 +37,11 @@ export const useProjectsInSidebarOrder = <T extends { id: string }>(
   items: readonly T[],
   enabled = true,
 ): readonly T[] => {
-  // Only the phone still has the List view, which keeps the manual order; the
-  // desktop and web sidebar sorts projects by the stored order in every grouping.
-  const isPhone = React.useMemo(() => getSettingsSurface() === 'mobile', []);
+  // Every sidebar sorts projects by the stored order, in either grouping.
   const isVSCode = React.useMemo(() => getSettingsSurface() === 'vscode', []);
   const projects = useProjectsStore((state) => (enabled ? state.projects : NO_PROJECTS));
   const manualOrder = useProjectsStore((state) => (enabled ? state.manualProjectOrder : NO_IDS));
-  const storedOrder = useSessionDisplayStore((state) => state.projectSortOrder);
-  const listView = useSessionDisplayStore((state) => isPhone && state.sidebarViewMode === 'timeline');
-  const order = listView ? 'manual' : storedOrder;
+  const order = useSessionDisplayStore((state) => state.projectSortOrder);
   const recent = enabled && order === 'recent';
   const sessions = useGlobalSessionsStore((state) => (recent ? state.activeSessions : NO_SESSIONS));
   // Archived sessions can tie an OpenCode project to a registered one, as in the sidebar's index.

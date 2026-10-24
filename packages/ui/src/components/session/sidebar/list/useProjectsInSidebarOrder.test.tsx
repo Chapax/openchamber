@@ -79,7 +79,7 @@ describe('useProjectsInSidebarOrder', () => {
     }
   });
 
-  test('follows the stored sort on the desktop and web, where the List view is gone', async () => {
+  test('follows the stored sort whatever the old List view setting says', async () => {
     useSessionDisplayStore.setState({ sidebarViewMode: 'timeline', projectSortOrder: 'a-z' });
     await act(async () => root.render(<Harness items={projects} />));
     expect(shown).toEqual(['alpha', 'bravo', 'charlie', 'delta']);

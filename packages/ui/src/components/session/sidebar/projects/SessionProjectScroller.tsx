@@ -11,13 +11,12 @@ import {
 import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Button } from '@/components/ui/button';
-import { formatDirectoryName, formatPathForDisplay } from '@/lib/utils';
+import { formatPathForDisplay } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
-import { isVSCodeRuntime, requestDirectoryAccess } from '@/lib/desktop';
+import { isVSCodeRuntime } from '@/lib/desktop';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
-import { refreshGlobalSessions } from '@/stores/useGlobalSessionsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useChildStoreManager } from '@/sync/sync-context';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -41,9 +40,9 @@ import { SessionDraftRow } from '../works/SessionDraftRow';
 import { isWorktreeWorkGroup } from '../works/sidebarWorks';
 import { SessionGroupSection, type SessionGroupSectionProps } from './SessionGroupSection';
 import type { ProjectSection } from './sessionProjectRender';
-import { formatProjectLabel } from '../utils';
 import { CrossfadeZoneHeader, CrossfadeZoneHeaders } from './CrossfadeZoneHeaders';
 import { prepareSessionProjectAction } from './sessionProjectActionContext';
+import { applyShowControl, getProjectLabel, grantGroupAccess, retryGroupStatus, toggleActivityZone } from './sessionProjectListActions';
 import { countArchiveAllOutcome, selectArchiveAllSessionIds, withArchiveAllSubtrees } from './archiveAllSessions';
 import { collectSessionSubtreeIds } from '../sessions/sessionSubtreeActions';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -85,7 +84,7 @@ type GroupActions = Pick<SessionGroupSectionProps,
   | 'setSessionSwitcherOpen' | 'openNewSessionDraft' | 'onToggleCollapsedGroup'
 >;
 
-type SessionProjectScrollerModel = {
+export type SessionProjectScrollerModel = {
   rowModel: SessionSidebarRowModel;
   sectionsForRender: ProjectSection[];
   projectSections: ProjectSection[];
@@ -97,7 +96,7 @@ type SessionProjectScrollerModel = {
   groupProps: GroupProps;
 };
 
-type View = {
+export type SessionProjectScrollerView = {
   homeDirectory: string | null;
   hasSessionSearchQuery: boolean;
   hideDirectoryControls: boolean;
@@ -106,7 +105,7 @@ type View = {
   projectSortOrder: ProjectSortOrder;
 };
 
-type Actions = {
+export type SessionProjectScrollerActions = {
   group: GroupActions;
   toggleProject: (id: string) => void;
   setActiveProjectIdOnly: (id: string) => void;
@@ -121,15 +120,12 @@ type Actions = {
   setSingleProjectId: (id: string) => void;
 };
 
-type Props = { model: SessionProjectScrollerModel; view: View; actions: Actions };
+/** What draws the list: the desktop's scroller, or the phone's own rows over the same model. */
+export type SessionProjectListProps = { model: SessionProjectScrollerModel; view: SessionProjectScrollerView; actions: SessionProjectScrollerActions };
 
 const FLAT_TEXT_INSET_PX = 10;
 
-const getProjectLabel = (project: ProjectSection['project'], homeDirectory: string | null): string => formatProjectLabel(
-  project.label?.trim() || formatDirectoryName(project.normalizedPath, homeDirectory) || project.normalizedPath,
-);
-
-function SessionProjectScrollerComponent({ model, view, actions }: Props): React.ReactNode {
+function SessionProjectScrollerComponent({ model, view, actions }: SessionProjectListProps): React.ReactNode {
   streamPerfCount('ui.sidebar_projects_list.render');
   const { t } = useI18n();
   const childStores = useChildStoreManager();
@@ -254,18 +250,8 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
   }, [model.rowModel.stickyHeaders]);
 
   const renderStatus = React.useCallback((row: Extract<SessionSidebarRow, { kind: 'status' }>) => {
-    const retry = () => {
-      if (!row.status.directory) {
-        void refreshGlobalSessions();
-        return;
-      }
-      childStores.requestBootstrap({ directory: row.status.directory, priority: 'expanded', reason: row.group.isMain ? 'project-expanded' : 'worktree-expanded', force: true });
-    };
-    const grant = async () => {
-      if (!row.status.directory) return;
-      const result = await requestDirectoryAccess(row.status.directory);
-      if (result.success) retry();
-    };
+    const retry = () => retryGroupStatus(row, childStores);
+    const grant = () => grantGroupAccess(row, childStores);
     let label: string;
     switch (row.status.state) {
       case 'permission-denied':
@@ -301,25 +287,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
           collapsed={row.collapsed}
           forceExpanded={row.forceExpanded}
           alwaysShowActions={view.alwaysShowActions}
-          onToggle={() => {
-            // Collapsing a zone forgets its Show more state: reopening it
-            // starts from the default reveal, like a group or project.
-            if (!row.collapsed) {
-              const containerKey = `activity:${row.activityKey}`;
-              actions.group.resetGroupSessionLimit(containerKey);
-              model.state.setVisibleActivityCountByKey((current) => {
-                if (!current.has(containerKey)) return current;
-                const next = new Map(current);
-                next.delete(containerKey);
-                return next;
-              });
-            }
-            model.state.setCollapsedActivityKeys((current) => {
-              const next = new Set(current);
-              if (next.has(row.activityKey)) next.delete(row.activityKey); else next.add(row.activityKey);
-              return next;
-            });
-          }}
+          onToggle={() => toggleActivityZone(row, { model, actions })}
           onNewChat={() => {
             useUIStore.getState().closeMainSurfaces();
             if (view.mobileVariant) actions.setSessionSwitcherOpen(false);
@@ -386,10 +354,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
           normalizedSessionSearchQuery={model.groupProps.normalizedSessionSearchQuery}
           alwaysShowActions={view.alwaysShowActions} mobileVariant={view.mobileVariant}
           onToggle={actions.group.onToggleCollapsedGroup}
-          openNewSessionDraft={actions.openNewSessionDraft}
-          setActiveProjectIdOnly={actions.setActiveProjectIdOnly}
           setSessionSwitcherOpen={actions.setSessionSwitcherOpen}
-          activeProjectId={model.groupProps.activeProjectId}
         />
         : <SessionGroupSection
           {...model.groupProps} {...actions.group}
@@ -484,16 +449,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
       ? FLAT_TEXT_INSET_PX
       : sessionTreeTextInset(row.kind === 'show-control' || row.kind === 'empty' ? row.depth ?? 0 : 0);
     if (row.kind === 'show-control') {
-      return <div><button type="button" className="mt-0.5 flex items-center justify-start rounded-md pe-1.5 py-0.5 text-start text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline" style={{ paddingInlineStart: rowTextInset }} onClick={() => {
-        if (row.containerKey.startsWith('activity:')) {
-          model.state.setVisibleActivityCountByKey((current) => {
-            const next = new Map(current);
-            if (row.control === 'more') next.set(row.containerKey, row.currentCount + row.increment); else next.delete(row.containerKey);
-            return next;
-          });
-        } else if (row.control === 'more') actions.group.showMoreGroupSessions(row.containerKey, row.currentCount, row.increment);
-        else actions.group.resetGroupSessionLimit(row.containerKey);
-      }}>{t(row.control === 'more' ? 'sessions.sidebar.group.showMore' : 'sessions.sidebar.group.showFewer')}</button></div>;
+      return <div><button type="button" className="mt-0.5 flex items-center justify-start rounded-md pe-1.5 py-0.5 text-start text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline" style={{ paddingInlineStart: rowTextInset }} onClick={() => applyShowControl(row, { model, actions })}>{t(row.control === 'more' ? 'sessions.sidebar.group.showMore' : 'sessions.sidebar.group.showFewer')}</button></div>;
     }
     if (row.kind === 'status') return renderStatus(row);
     if (row.emptyKind === 'sidebar') return model.emptyState;

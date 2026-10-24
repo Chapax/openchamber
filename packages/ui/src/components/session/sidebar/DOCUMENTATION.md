@@ -81,10 +81,10 @@ configured root (non-git directories, `C:/`, subagent workspaces), so mapping it
 would file unrelated sessions under whichever project owns the id. This fallback
 changes display ownership, not the session's real directory used for routing.
 Records with no resolved owner have no guaranteed project group. VS Code keeps
-exact workspace-directory scope and does not use the fallback. The mobile sheet,
-In work, and Timeline use this same ownership resolver; rows keep the session's
-own directory while taking display ownership (project id, labels) from the
-index.
+exact workspace-directory scope and does not use the fallback. In work and
+the list by time use this same ownership resolver, on the phone too; rows keep
+the session's own directory while taking display ownership (project id,
+labels) from the index.
 
 Web and desktop show managed Chats, then Pinned and In work, then the projects
 or the list by time (see One view). There is no Recent zone any more (removed
@@ -92,61 +92,12 @@ or the list by time (see One view). There is no Recent zone any more (removed
 "what was I doing" across projects. Chats use
 their shared managed root for folders and never expose worktree actions. Project
 display can be all projects or one selected project; Chats, Pinned and In work
-keep their global scope. The mobile sessions sheet
-(`apps/MobileSessionsSheet.tsx`) partitions the same way through
-`partitionSidebarSessions` and lists Chats as a collapsible section above the
-project tree — only while the per-surface show-chats sidebar setting is on,
-which Settings owns; the phone's display menu has no Chats toggle, so a hidden
-section here is the setting at work, not a missing section (#5354). Its header
-has no title: close, Add project, the display menu
-(a dropdown with the view, the project sort, the section toggles and Reorder
-projects, which swaps the menu's button for Done while it runs) and New chat;
-Chats has no "+" of its own, as New chat starts the same chat. Its footer
-keeps Issues and PRs and Settings as buttons and puts Scheduled tasks,
-Archive and Usage in a "More" menu. Rows that span projects are labelled "project · branch" through
-`resolveSidebarSessionLocations` (live root branch included; the branch map is
-held while the drawer closes). A session of an isolated space has the space's
-name where the branch goes and `inSpace` set on its location, so the timeline
-and In work rows of the desktop and the phone mark it with the container icon
-the space's group carries, never with the branch icon. The phone's timeline
-(`apps/MobileTimelineList.tsx` rows, built by the sheet) mirrors the desktop:
-manual project order with reordering, one header per project over its root
-sessions from every worktree and space, 7 at a time with Show more / Show
-fewer (collapsing a project resets it), two-line rows with a fixed-height
-second line, and the project's icon on that line in In work. Sorted by time
-(the display menu's Sessions choice), it lists every project's sessions under
-one Projects section in the desktop's three-line rows, without the sessions
-Pinned and In work list and without Reorder projects; the sheet is not
-virtualized, so the rows arrive 40 at a time as the end scrolls near (an
-intersection sentinel in `MobileTimelineList.tsx`), with no Show more row. The
-phone's Tree view follows the desktop tree: Chats, Pinned and In work list
-tree rows at level 0 (two-line timeline rows when Detailed rows is on, the
-zones showing all their sessions at once), and project sessions are
-tree rows (12px per level, subsession chevron on the left with a
-thumb-sized target) with the desktop's guide lines, worked out while the
-sheet renders its nested tree. A tree row shows its live state in the slot left of the
-title; a row with subsessions keeps its chevron there, since a phone has no
-hover to trade them, and shows its state on the right. Titles carry the state
-as on the desktop (`apps/mobileSessionTitle.ts`), and run titles are muted.
-Worktree headers are drawn as
-folder rows (chevron, 12px icon, medium-weight label a step below full
-strength), each opening with a
-small gap. Zone and project labels share the header size and no rule
-separates projects, as zones and projects are sections of equal weight. Its tree starts 32px in
-(`MOBILE_TREE_BASE_PADDING_PX`), so root session titles start where the
-project label does next to the project icon's 32px slot (no tile: a bare
-20px glyph, or a 24px image with rounded corners; zone icons likewise). In
-Tree the phone shows the project's and each worktree's chat folders above
-their other sessions, in the desktop's order with sub-folders named
-"Parent / Child", each a folder row with its filed top-level sessions one
-level under it. The phone does not create, rename, delete or file folders: its
-rows have no menu, and the swipe actions already hold the five actions a phone
-uses most; folders are edited on the desktop or the web, and the phone shows
-the change at once. Collapsing a folder there is the phone's own, as
-everywhere. A search lists its matches without folders, and List has none,
-as on the desktop. Its display menu offers the Pinned and In work toggles and, in Tree,
-Detailed rows; pinned sessions and sessions in work stay under their project
-in both views. VS Code excludes
+keep their global scope. Rows that span projects are labelled "project · branch"
+through `resolveSidebarSessionLocations` (live root branch included). A
+session of an isolated space has the space's name where the branch goes and
+`inSpace` set on its location, so the zone rows of the desktop and the phone
+mark it with the container icon the space's group carries, never with the
+branch icon. The phone lists the same rows (see The phone). VS Code excludes
 worktrees and managed
 Chats, while retaining its workspace-scoped grouped list and inline archived
 buckets.
@@ -159,16 +110,15 @@ someone just worked in leads the list as a session there would. A worktree
 spends one slot of the root's Show more limit, like a run; one with no session
 yet closes the list, the newest first (`useSessionGrouping`). Worktrees filed
 in a folder stay in the folder; spaces and the archive bucket follow the
-list. There is no worktree sort and no worktree dragging. The mobile sheet
-keeps its own manual worktree order (`useWorktreeOrderStore`).
+list. There is no worktree sort and no worktree dragging, on the phone either:
+its project editor lists the worktrees in the topology's order, with Delete.
 
 Every other list of projects shows them in the sidebar's order through
 `list/useProjectsInSidebarOrder.ts`: Settings > Projects, the project
 selector of the Settings pages, the composer's project picker until a search
 is typed, the move-chat, scheduled tasks and install-skill pickers, the
 tracker project mapping, usage stats and the issues board. It applies the same
-`sortProjectsByOrder`, keeps the manual order while the phone shows its List
-view, and for `recent` ranks by `rankByLatestActivity` with the sidebar's
+`sortProjectsByOrder` with the stored sort, as every sidebar does, and for `recent` ranks by `rankByLatestActivity` with the sidebar's
 ownership rules over the global session list, archived sessions included; a
 live session the global list has not picked up yet counts once it does. It
 reads sessions and spaces only in `recent` and only while its list is shown
@@ -176,8 +126,76 @@ reads sessions and spaces only in `recent` and only while its list is shown
 hold the order under the pointer the way the sidebar does. Search ranking keeps its own order; the
 command palette lists projects only for a query, so it does not use it.
 
-Hosted mobile and Capacitor use their separate `MobileSessionsSheet` renderer.
-The shared directory-cache rules apply there, but this sidebar virtualizer does not.
+## The phone
+
+Hosted mobile and Capacitor list the same works as the desktop. The phone's
+drawer (`apps/MobileSessionsSheet.tsx`, also the iPad's sidebar) mounts
+`SessionSidebar` with `phone` set: the collection, its topology and the row
+model are the desktop's, and `view.renderList` hands the rows to
+`apps/mobileSidebar/MobileSessionList.tsx`, which draws them with the phone's
+own row components in the shared virtualizer (`SessionSidebarRows`, the
+disclosure animation included). Only how a row is drawn and used differs, as
+the maintainer decided on 2026-10-24: a phone has no hover, no right click and
+no Shift.
+
+- The drawer keeps its header (close, Add project, the display menu, New
+  chat), the search field over the list, Reorder projects, the footer and the
+  dialogs a row opens (project edit, new worktree, worktree delete). The
+  display menu holds Grouping (by project or by time, `sidebarGrouping`), the
+  project sort while grouped by project, Show pinned section, Show In work,
+  "Also show in work under projects", Detailed rows and Reorder projects. Chats
+  shows while the per-surface show-chats setting is on, which Settings owns
+  (#5354); the header's New chat starts a chat, so Chats has no "+" of its own.
+  The footer keeps Issues and PRs and Settings as buttons and puts Scheduled
+  tasks, Archive and Usage in a "More" menu.
+- What a pointer does on hover or with a right click, a thumb does with a
+  swipe (`MobileSwipeActionsRow`, one row out at a time,
+  `mobileSidebar/mobileSidebarState.ts`): a session reveals archive, pin and
+  Track or Done (top-level rows), delete (two taps), rename and Copy ID; a
+  worktree work Done or Track, Rename, Archive worktree and Delete (its
+  dialog); a run Done or Track, Open overview, Rename and Archive run; a draft
+  Discard, without asking; a project Remove (two taps) and Edit; a space its
+  access dialog and actions sheet. There is no long press: the swipe already
+  holds every action. The rows share their behaviour with the desktop's
+  through `useWorktreeWork`, `useRunWork` and `useSessionDraftRow`.
+- A tap opens what the row stands for and closes the drawer. The chevron is
+  always shown, since there is no hover to reveal it: in the slot of a
+  one-line row, over the second line's first icon of a two-line row, in a
+  thumb-sized target. A one-line row with nothing to open shows its live state
+  in the slot; a parent shows it on the right. No row shows a date, as on the
+  desktop: the list is ordered by recency; a turn's duration shows while it
+  runs and until it is read.
+- Detailed rows are on by default on the phone (store v12; a phone that was on
+  the old List keeps two lines). Rows start near the edge, as the desktop's
+  do: a two-line row's text 12px in, a one-line row's slot there and its text
+  20px further (`mobileSidebar/mobileSidebarGeometry.ts`); the tree guides
+  follow. The old 32px inset under the project tile went with the tree it
+  served (maintainer, 2026-10-24).
+- The drawer has one gutter, 12px on both sides, the New chat button's: the
+  header's buttons, the search field, the section headers, the rows and the
+  footer all end there. A section header's icon sits in the column of the
+  rows' chevrons and states. Rows are rounded tiles, as on the desktop, not
+  bands across the screen. The selected row takes the
+  desktop's selection fill and title colour, painted over the row's opaque
+  background (`MOBILE_ACTIVE_ROW_CLASS`): the selection token is translucent,
+  and as a background it let the swipe actions behind the row show through.
+- The phone shows folders and folds them, but does not create, rename, delete
+  or file them: folders are edited on the desktop or the web.
+- Search filters the list in place, as on the desktop.
+- Each time the drawer opens, the row of what is on screen (the run, the
+  session or its folded work, else the active project) scrolls into view.
+  The iPad's sidebar counts as open while it is shown; it stays mounted while
+  hidden, as the phone's drawer does.
+- Because the drawer's list is always mounted, it owns worktree discovery on
+  the phone and the iPad (its `SessionSidebar` lists every project's
+  worktrees and refreshes them on `worktree-changed` and `session-created`);
+  `MobileApp` no longer runs a discovery of its own.
+- Opening a new worktree from a project header leaves the active project as it
+  is: the dialog takes the project as a prop, and a changed active project
+  would make the list open that project's last session behind the dialog.
+- The phone reads no session ahead (`useSessionPrefetch`): every speculative
+  history read costs mobile data, and its list never did.
+
 
 Both project display modes use `projects/CrossfadeZoneHeaders.tsx` for sticky
 zone headers. The live header keeps one portal host as it moves between its
@@ -262,11 +280,10 @@ unchanged so ordinary session updates do not invalidate project sections.
   that only opened the overview, with no actions and no lanes, read as foreign
   in the list of works and could not be finished from In work.
 
-The mobile sheet does not use the row model: `MobileSessionsSheet` builds the
-same index, moves members to the project root bucket and renders one
-`MobileRunRow` per run that opens the overview. Row memoization compares
-membership semantics (`sameMultiRunIdentity`, including the run title) so
-metadata-only changes update rows. See `lib/multirun/DOCUMENTATION.md`.
+The phone draws the same run rows (`MobileRunRow` in
+`apps/mobileSidebar/MobileWorkRows.tsx`). Row memoization compares membership
+semantics (`sameMultiRunIdentity`, including the run title) so metadata-only
+changes update rows. See `lib/multirun/DOCUMENTATION.md`.
 
 ## Works
 
@@ -357,9 +374,8 @@ The desktop and web sidebar has one view. `sidebarGrouping`
 (`useSessionDisplayStore`, per surface) groups works under their projects or
 in one list by time; until the user picks one it follows the Tree / List pair
 it replaced (`resolveSidebarGrouping`: List sorted by time keeps the list by
-time, everything else groups by project). The phone still reads
-`sidebarViewMode` and `listSessionGrouping`, and VS Code always groups by
-project. The display menu opens with Select sessions, then Grouping, then
+time, everything else groups by project); the phone follows the same
+setting, and VS Code always groups by project. The display menu opens with Select sessions, then Grouping, then
 (grouped by project) the project sort and project display,
 then the section toggles (Chats, Pinned, In work), "Also show in work under
 projects" (`keepWorkInPlace`, `sidebarKeepWorkInPlace`, off by default, shown
@@ -456,13 +472,10 @@ the glyph draws small), quick archive/delete, the menu. Pin/unpin lives in the
 menu only. Touch layouts (`alwaysShowActions`) keep Track / Done in the menu.
 At rest a row in work shows a grey check only while Jev's done hint is
 current (`isDoneSuggested`); the composer shows the same hint as a top row
-(`components/chat/SessionDoneHintRow.tsx`). The mobile sheet
-(`apps/MobileSessionsSheet.tsx`) keeps its own In work section, whose sessions
-stay in their project buckets, with Track / Done as a swipe action on
-top-level rows. Mobile swipe actions run left to right by how often they are
-used on a phone: archive, pin (top-level rows), Track / Done (top-level rows,
-feature on), delete, rename; AI rename sits inside the rename editor. Mobile
-rows also show the goal glyph and the permission/question badges
+(`components/chat/SessionDoneHintRow.tsx`). The phone's session swipe actions
+run left to right by how often they are used on a phone: archive, pin
+(top-level rows), Track / Done (top-level rows, feature on), delete, rename;
+AI rename sits inside the rename editor. Phone rows also show the goal glyph and the permission/question badges
 (`apps/MobileSessionStateBadges.tsx`) from the cross-directory request index
 (`sync/global-blocking-requests.ts`). Row memoization compares `metadata` by
 reference and `time.idle`, so metadata-only changes (work, goal, recap)
@@ -494,9 +507,9 @@ this device failed to store (offline, or a 413 for attachments over the
 server's limit, which the user is told once) keeps this device's newer copy
 when reopened here. The first draft opened in a folder takes over the text
 that folder kept under the old per-folder key
-(`readChatDraftClaimingFolderDraft`). Search leaves drafts out. VS Code has no
-shared drafts and the phone does not list them yet: both keep the per-folder
-key, where a new draft finds the text left in that folder.
+(`readChatDraftClaimingFolderDraft`). Search leaves drafts out. The phone lists
+and opens the same drafts. VS Code has no shared drafts: it keeps the
+per-folder key, where a new draft finds the text left in that folder.
 
 ## Folders with worktrees
 
@@ -567,10 +580,7 @@ failure). Older versions kept pins in this device's storage
 (`oc.sessions.pinned.v2`); those count as pinned until the first complete
 session list of their server, when they move into metadata, a pin whose
 session is gone is dropped, and one that fails to write stays for the next
-load. The phone sheet
-mirrors both toggles: its display menu offers Show pinned section and, in
-its Tree, Detailed rows, and its Pinned and In work sections render tree rows
-there unless detailed rows are on. VS Code
+load. The phone's display menu has both toggles. VS Code
 shows no section toggles, so it has no Pinned zone and its In work rows stay on
 one line.
 
@@ -663,7 +673,7 @@ matching and ordering. Search does not fetch sessions or broaden list membership
   shows no chevron, does not toggle, lists nothing under its header, and is
   always open: a collapse saved while it had sessions is dropped, so its first
   new session shows at once. A group counts as empty only once its sessions
-  have loaded; before that it only looks empty, and the saved collapse stays. The phone treats empty worktrees the same way. Collapsing a project or a worktree group, from its
+  have loaded; before that it only looks empty, and the saved collapse stays. Collapsing a project or a worktree group, from its
   header or Collapse all, forgets its Show more state. The project
   header stays the sticky zone band above its tree. Root sessions and the
   root's folders sit at level 0; worktree, space and archive headers sit at
@@ -738,8 +748,7 @@ matching and ordering. Search does not fetch sessions or broaden list membership
   Clipped at full strength, a closing row stayed legible until the rows
   sliding up cut through it, which read as old content lingering over the new. Collapse all, search, Show more and
   live list changes do not animate, nor does anything under reduced motion.
-  The phone's sessions sheet does the same with a height animation per body
-  (`apps/MobileDisclosure.tsx`).
+  The phone's list is drawn by the same renderer and animates the same way.
 - Shift selection and Ctrl/Cmd+A consume the model's logical row order. API
   session IDs are deduplicated only at the action boundary, after hidden
   descendants have been included. Selection is cleared on runtime switch and
@@ -772,14 +781,14 @@ matching and ordering. Search does not fetch sessions or broaden list membership
   Tree worktree group reveals 7 sessions, 7 more per Show more, and 10 in
   VS Code. Reveal
   controls change the logical list, not the viewport's bounded mounted window.
-- Archiving or deleting a session takes its whole active subtree with it on every surface, because the server does not cascade `time.archived`. In work and managed Chats build their rows with `buildActiveSessionNode` from `list/sessionCollection.ts`, so the descendants a row collects match the project tree at any depth; the mobile sessions sheet resolves the same lineage with `getDescendantIds` over its full active list rather than the rendered bucket. `sessions/sessionSubtreeActions.ts` owns the single-versus-batch store calls and the outcome toasts for all of them, and `collectSessionSubtreeIds` extends the surface's own descendant list at action time with the global session lineage (`stores/sessionLineage.ts`), so an active subagent below an archived intermediate is still archived (archive skips the archived intermediate; delete includes it). A projection that flattens a tree to one level silently leaves grandchildren active. The project menu's "Archive all" archives the subagents of each selected session in the same batch; its dialog and success toast count top-level sessions, the rows the user sees.
+- Archiving or deleting a session takes its whole active subtree with it on every surface, because the server does not cascade `time.archived`. In work and managed Chats build their rows with `buildActiveSessionNode` from `list/sessionCollection.ts`, so the descendants a row collects match the project tree at any depth; the phone's swipe actions resolve the same lineage with `getDescendantIds` over every active session when they run (`apps/mobileSidebar/mobileSessionActions.ts`). `sessions/sessionSubtreeActions.ts` owns the single-versus-batch store calls and the outcome toasts for all of them, and `collectSessionSubtreeIds` extends the surface's own descendant list at action time with the global session lineage (`stores/sessionLineage.ts`), so an active subagent below an archived intermediate is still archived (archive skips the archived intermediate; delete includes it). A projection that flattens a tree to one level silently leaves grandchildren active. The project menu's "Archive all" archives the subagents of each selected session in the same batch; its dialog and success toast count top-level sessions, the rows the user sees.
 - Subsessions belong to the agent run that spawned them, not to the user. They appear only nested under an active parent: the archive (sidebar bucket, auto folders and the Archive page) lists top-level sessions only, an archived subsession or one under an archived parent is hidden rather than promoted to a row of its own, and there is no restore for a subsession; it comes back when its parent is restored. A subsession whose parent is not loaded yet stays visible as a root.
 - Folder membership may contain both a parent session and its descendants. Rendering treats only the highest assigned ancestors as folder roots because their normal session trees already include assigned descendants; persisted membership remains unchanged for cleanup and move semantics.
 - Sidebar selection holds the clicked row's viewport position across navigation-driven sidebar updates. Wheel or touch input cancels the hold immediately, so programmatic compensation never fights intentional scrolling.
 - Global session subscriptions are structural: create/delete, title, archive, directory, parent, and slug changes invalidate the tree. Recency-only `time.updated` changes do not trigger a rebuild, from the global cache or from the live child-store list: the collection subscribes only to the live sessions the global cache does not hold yet (`useLiveSessionsExcluding`), so a covered session's live bumps neither re-render the sidebar nor rebuild the structure. The separate lifecycle rank invalidates ordering only on `settled ↔ active` transitions, with root sessions ranked among roots and child sessions only among siblings of the same parent.
 - The published worktree topology leaves out every checkout that holds a configured project in a sub-folder, as it leaves out checkouts that are configured projects (`partitionWorktreesByRegisteredProject` in `lib/worktrees/worktreeManager.ts`). For a project that is a sub-folder of a repository, the repository's checkout would otherwise show as a removable worktree whose delete dialog names the whole repository (issue #4666). The raw per-project lists keep that entry, because it ties a sub-folder project to its repository when one project's refresh replaces the buckets of the repository. The root-session `Move to worktree` menu does not offer that checkout either, unless the session is already there. Sessions in it outside every project folder belong to no project, like sessions in any folder that is not added: adding the repository root as a project shows them (maintainer decision 2026-10-11).
 - A worktree Git still registers but whose directory is gone (`prunable` in `git worktree list`) stays in the topology with `worktreeStatus: 'missing'` and a warning icon on its group header. Its sessions remain accessible for manual movement or archiving through worktree deletion. Opening a session does not move it. The ordinary worktree delete action accepts a missing directory. Shift+click on the worktree delete button (it turns red while Shift is held) archives the group's sessions and deletes the worktree and its local branch without the dialog, never the remote branch, but only when a fresh status check finds no uncommitted changes and every commit already on the branch's upstream or, for a never-pushed branch, on the base branch the server compared it with (`aheadBase`, e.g. `origin/main`) or on another remote branch (`canDeleteWorktreeWithoutConfirm`); any other result, including a failed check or a never-pushed branch the server could not compare, opens the ordinary dialog. Topology discovery remains event-driven, including `session-created` and server `worktree-changed` control events, with no idle polling. A `session-created` event refreshes only the project whose root is the session's directory or whose known worktree holds it (`resolveProjectForCreatedSession`); any other directory, such as a new worktree nobody has listed yet, gets the full discovery, because a registered folder above it does not prove which repository it belongs to. After an instance switch the project list comes from the local cache, so discovery can run before the instance answers: projects whose discovery failed are discovered again once when the connection comes up. The worktree list and project-root caches are keyed by path, so a runtime switch clears them. The server sends `worktree-changed` after its own worktree create/remove and when a status or listing request notices that a repository's worktree set changed (see `packages/web/server/lib/git/DOCUMENTATION.md`); the event names every directory of that repository the server has seen, and the sidebar refreshes each registered project among them once, bypassing the 30-second list cache. A worktree this client created and is still bootstrapping keeps its `pending`/`invalid` status through that refresh. Hosted mobile and the desktop mini chat handle the same control event through `lib/worktrees/worktreeTopologyRefresh.ts`; VS Code intentionally excludes worktree topology.
-- A worktree this client is removing shows it on its row, from the user's confirmation until git answers: a spinner replaces the branch icon, the row dims and its delete action hides. The desktop group header, the mobile sheet's worktree bucket and the mobile project-edit worktree list all read `lib/worktrees/worktreeRemovalState.ts`. The row leaves with the topology once git confirms. It does not fade out: the server's `worktree-changed` refresh drops it as soon as the removal finishes, which would cut any exit animation short. A failed removal clears the state and the row returns to normal beside the error toast. Removing the files of a large worktree takes tens of seconds, so the spinner stays for as long as the deletion runs, never shorter. Another window removing the same worktree shows nothing until the topology refresh drops the row.
+- A worktree this client is removing shows it on its row, from the user's confirmation until git answers: a spinner replaces the branch icon, the row dims and its delete action hides. The desktop and phone worktree rows and the phone's project-edit worktree list all read `lib/worktrees/worktreeRemovalState.ts`. The row leaves with the topology once git confirms. It does not fade out: the server's `worktree-changed` refresh drops it as soon as the removal finishes, which would cut any exit animation short. A failed removal clears the state and the row returns to normal beside the error toast. Removing the files of a large worktree takes tens of seconds, so the spinner stays for as long as the deletion runs, never shorter. Another window removing the same worktree shows nothing until the topology refresh drops the row.
 - Opening the root-session `Move to worktree` submenu force-refreshes the owning project's worktree topology so externally created worktrees appear without a full reload. While that refresh runs, the menu keeps the last known primary/linked topology visible; if the refresh fails, the stale topology remains and the load failure state stays explicit. Failure cleanup never removes or manages an existing destination worktree. The owning project resolves from the row's project id, then from the session's directory, then from the session's worktree metadata `projectDirectory` — the last step keeps sibling destinations listed for a restored session whose own worktree directory was deleted.
 - Unarchiving a session whose directory the server confirms missing (its worktree was removed while it sat in the archive, by this app, by hand or by git) moves it, with its subsessions in that directory, to its project root (`lib/worktrees/relocateRestoredSession.ts`, maintainer decision 2026-10-02). OpenCode cannot run a prompt in a missing directory (it answers 500), while `session.move` works from one and appends a `location-switched` record that tells the model its working directory changed. The project root comes from the same ownership index as grouping (directory first, then OpenCode project metadata), so it survives a restart. A toast names the cause, the missing folder, not an action of this app. An unknown availability answer, an unresolved project or a missing project root leaves the session where it is; a rejected move shows an error toast.
 - Cleanup after a PR merge is opt-in (`mergedWorktreeCleanupEnabled`, Settings → Sessions → Finished worktrees, beside archiving on Done, off by default; maintainer decision 2026-10-02). `hooks/useMergedWorktreeCleanup.ts` reads the branch PR status the sidebar already keeps fresh for each discovered linked worktree, asking GitHub nothing itself, and `lib/worktrees/mergedWorktreeCleanup.ts` decides: wait while any session there is not confirmed idle, is the open session, or the worktree is the directory on screen; otherwise archive the worktree with its sessions. An archive keeps uncommitted work and commits outside the merged PR, so the earlier rule (remove only a checkout with nothing to lose, keep the rest) is gone with the checks it needed. Each worktree and PR pair is tried once (remembered in local storage), so a failed archive is not retried on every pass. A worktree being archived or removed right now is skipped, so Done and a pass never archive it twice; a worktree the user restored from the archive is marked handled for its PR on the next pass (`takeRestoredWorktree`), since restoring a merged worktree is taking it back. It runs on desktop and web only; VS Code has no worktrees and a phone would race the desktop it drives. Only worktrees of projects whose worktrees the sidebar has discovered are covered.
@@ -851,13 +860,16 @@ other of the project, with a collapsible group of its own, so it is listed
 among them by its latest activity, and the worktree sort, the saved drag
 order (`oc.sessions.groupOrder`) and worktree dragging went with the block.
 
-### Why the phone's List search skips subsessions and does not reveal them
+### Why the phone draws the desktop's rows and not its own list
 
-The phone's List rows are flat on purpose, so a root kept for its subsession's match
-showed a row whose match the user could neither see nor open, under a count
-that included it. Revealing the subsession would make List rows expand, which
-is what Tree is for. The maintainer chose that List search matches only the
-sessions List shows (#4843); Tree keeps looking through the whole tree.
+The phone had its own list, built in its drawer: Tree and List views, worktree
+groups, its own In work, per-folder drafts. Once the desktop listed works, the
+two answered differently what the user was working on, and every change to
+works had to be made twice. The maintainer chose (2026-10-24) one model for
+both, with the phone's rows for a thumb: swipe instead of hover and menus,
+the chevron always shown, two lines by default. The phone keeps its own
+renderer rather than the desktop's rows, whose hover actions, menus and
+drag-and-drop a touch screen cannot use.
 
 ### Why tree guides end in a corner at the last child
 

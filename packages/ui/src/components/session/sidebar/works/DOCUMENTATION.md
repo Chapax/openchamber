@@ -1,6 +1,6 @@
 # Sidebar works
 
-The desktop and web sidebar lists works. This folder owns what a work is and
+The sidebars of the desktop, the web and the phone list works. This folder owns what a work is and
 the rows that only works have; the sidebar's `DOCUMENTATION.md` (Works, One
 view, In work, Drafts, Folders with worktrees) describes how they are laid out.
 
@@ -17,10 +17,15 @@ view, In work, Drafts, Folders with worktrees) describes how they are laid out.
   reviews and forks, newest first), Track, and Done on a worktree work
   (`finishWorktreeWork`: sessions done, the work left, and with `archive` the
   worktree archived with its sessions).
-- `WorktreeWorkRow.tsx`: a worktree's work row, in its project, in a folder or
-  in a zone (`mixed`).
-- `SessionDraftRow.tsx`, `openSessionDraft.ts`: a left draft's row and
-  reopening it in the composer.
+- `useWorktreeWork.ts`, `useSessionDraftRow.ts`: what a worktree work's row
+  and a draft's row know and do (the label, selection, open, Done, Archive,
+  rename; open and discard), shared by the desktop's rows and the phone's
+  (`apps/mobileSidebar/MobileWorkRows.tsx`), which differ only in how they are
+  drawn and used.
+- `WorktreeWorkRow.tsx`: the desktop's worktree work row, in its project, in a
+  folder or in a zone (`mixed`).
+- `SessionDraftRow.tsx`, `openSessionDraft.ts`: the desktop's row of a left
+  draft and reopening it in the composer.
 
 Invariants:
 

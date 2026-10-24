@@ -1,7 +1,6 @@
 import React from 'react';
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import { Icon } from '@/components/icon/Icon';
-import { toast } from '@/components/ui';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -21,25 +20,18 @@ import { FileTreeChevron } from '@/components/views/files/FileTreeRowParts';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { handleSessionRenameKeyDown } from '@/components/session/sessionRenameKeyboard';
 import { useI18n } from '@/lib/i18n';
-import { archiveRun, renameRun } from '@/lib/multirun/runActions';
-import { isSessionInWork } from '@/lib/sessionWorkMetadata';
-import { leaveFinishedSessions } from '@/lib/sessionTabs';
 import { cn } from '@/lib/utils';
-import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useUIStore } from '@/stores/useUIStore';
-import { setSessionWorkState } from '@/sync/session-actions';
-import { useSessionUIStore } from '@/sync/session-ui-store';
 import type { MultiRunSummary } from '@/lib/multirun/runs';
-import type { Session } from '@/lib/opencode/model';
 import type { SessionNode } from '../types';
-import { normalizePath } from '../utils';
 import { CollapsedActivityIndicator } from './collapsedActivityIndicator';
 import { useCollapsedSessionActivityState } from './collapsedActivityState';
 import { SessionTimelineRowBody } from './SessionTimelineRowBody';
+import { useRunWork } from './useRunWork';
 import { sessionDetailedRowPaddingLeft, sessionTreeRowPaddingLeft } from './sessionTreeGeometry';
 
 const MAX_LOGOS = 4;
+const NO_NAVIGATION = (): void => undefined;
 
 type MenuSlots = {
   Item: React.ComponentType<{ className?: string; onClick?: (event: React.MouseEvent) => void; children?: React.ReactNode }>;
@@ -79,19 +71,6 @@ function ProviderLogos({ providerIDs, ringClass }: { providerIDs: readonly strin
   );
 }
 
-/** The lanes and the sessions they started, past subagents: what Done finishes. */
-const collectRunWorkSessions = (laneNodes: readonly SessionNode[]): Session[] => {
-  const sessions: Session[] = [];
-  const stack = [...laneNodes];
-  while (stack.length > 0) {
-    const node = stack.pop();
-    if (!node) continue;
-    sessions.push(node.session);
-    for (const child of node.children) if (!child.session.parentID) stack.push(child);
-  }
-  return sessions;
-};
-
 /**
  * A multi-run in the sidebar: a work like a session or a worktree. It reads
  * like their rows (the lanes' state in the slot, else the run's mark; the
@@ -117,12 +96,8 @@ function RunSidebarRowComponent({
   toggleParent,
 }: Props): React.ReactNode {
   const { t } = useI18n();
-  // Selected while the screen shows the run: its overview, or one of its
-  // sessions (a click opens the fusion), as a worktree's row is.
-  const overviewKey = useUIStore((state) => state.runOverviewKey);
-  const showsMember = useSessionUIStore((state) => state.currentSessionId !== null && run.memberIds.includes(state.currentSessionId));
-  const isActive = overviewKey === run.key || (overviewKey === null && showsMember);
-  const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
+  const work = useRunWork(run, laneNodes, NO_NAVIGATION);
+  const { isActive, sessionWorkEnabled, inWork, busy } = work;
   const project = useProjectsStore(React.useCallback((state) => (
     detailed && mixed && projectId ? state.projects.find((entry) => entry.id === projectId) ?? null : null
   ), [detailed, mixed, projectId]));
@@ -133,12 +108,8 @@ function RunSidebarRowComponent({
   const activityNodes = React.useMemo(() => [...laneNodes], [laneNodes]);
   const activityState = useCollapsedSessionActivityState({ nodes: activityNodes, blockingSessionIds });
   const activity = activityState ? <CollapsedActivityIndicator state={activityState} /> : null;
-  const workSessions = React.useMemo(() => collectRunWorkSessions(laneNodes), [laneNodes]);
-  const inWorkSessions = React.useMemo(() => workSessions.filter(isSessionInWork), [workSessions]);
-  const inWork = sessionWorkEnabled && inWorkSessions.length > 0;
   const expandable = laneNodes.length > 0;
   const isExpanded = forceExpanded || expanded;
-  const [busy, setBusy] = React.useState(false);
   const [renaming, setRenaming] = React.useState(false);
   const [renameDraft, setRenameDraft] = React.useState('');
   const renameInputRef = React.useRef<HTMLInputElement>(null);
@@ -153,45 +124,18 @@ function RunSidebarRowComponent({
   }, [renaming]);
 
   const openOverview = (): void => {
-    if (renaming) return;
-    useUIStore.getState().setRunOverviewKey(run.key);
+    if (!renaming) work.openOverview();
   };
-  // A click opens the run's result, the newest fusion, as a worktree's row
-  // opens its session; without one, the overview where the lanes compare.
   const openRun = (): void => {
-    if (renaming) return;
-    const fusionId = run.fusions[0]?.sessionId;
-    if (!fusionId) {
-      openOverview();
-      return;
-    }
-    useUIStore.getState().closeMainSurfaces();
-    useSessionUIStore.getState().setCurrentSession(fusionId, useGlobalSessionsStore.getState().entityById.get(fusionId)?.directory ?? null);
+    if (!renaming) work.open();
   };
   const toggle = (event: React.SyntheticEvent): void => {
     event.stopPropagation();
     if (!forceExpanded) toggleParent(expansionKey);
   };
-  const toggleWork = async (event: React.MouseEvent): Promise<void> => {
+  const toggleWork = (event: React.MouseEvent): void => {
     event.stopPropagation();
-    if (busy) return;
-    setBusy(true);
-    try {
-      if (inWork) {
-        for (const session of inWorkSessions) {
-          await setSessionWorkState(session.id, normalizePath(session.directory ?? null), 'done');
-        }
-        // Done work leaves the working set, as it does for a session.
-        leaveFinishedSessions(inWorkSessions.map((session) => session.id));
-      } else {
-        const first = laneNodes[0]?.session;
-        if (first) await setSessionWorkState(first.id, normalizePath(first.directory ?? null), 'open');
-      }
-    } catch {
-      toast.error(inWork ? t('sessions.sidebar.work.done.failed') : t('sessions.sidebar.work.track.failed'));
-    } finally {
-      setBusy(false);
-    }
+    void work.toggleWork();
   };
   const startRename = (): void => {
     setRenameDraft(run.title);
@@ -199,21 +143,9 @@ function RunSidebarRowComponent({
   };
   const saveRename = async (): Promise<void> => {
     setRenaming(false);
-    const title = renameDraft.trim();
-    if (!title || title === run.title) return;
-    const failed = await renameRun(run, title, useGlobalSessionsStore.getState().entityById);
-    if (failed.length > 0) toast.error(t('multirun.overview.rename.failed'));
+    await work.rename(renameDraft);
   };
-  const archive = async (): Promise<void> => {
-    setBusy(true);
-    try {
-      const result = await archiveRun(run);
-      if (result.failedIds.length > 0) toast.error(t('multirun.overview.archive.failed'));
-      else if (useUIStore.getState().runOverviewKey === run.key) useUIStore.getState().closeMainSurfaces();
-    } finally {
-      setBusy(false);
-    }
-  };
+  const archive = work.archive;
 
   const renderMenuItems = (Slots: MenuSlots): React.ReactNode => (
     <>
