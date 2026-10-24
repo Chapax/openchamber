@@ -146,8 +146,12 @@ no Shift.
   "Also show in work under projects", Detailed rows and Reorder projects. Chats
   shows while the per-surface show-chats setting is on, which Settings owns
   (#5354); the header's New chat starts a chat, so Chats has no "+" of its own.
-  The footer keeps Issues and PRs and Settings as buttons and puts Scheduled
-  tasks, Archive and Usage in a "More" menu.
+  The footer has the connected instance on the left (the app) and on the
+  right "More" (Scheduled tasks, Archive, Usage), a pending web update, the
+  overview, Issues and PRs, then Settings, the one filled button; the rest
+  are flat, as the header's. The iPad's sidebar keeps the search field behind
+  a toggle at the header's leading edge, as the desktop does; closing it
+  clears the query. The phone's drawer shows the field at once.
 - What a pointer does on hover or with a right click, a thumb does with a
   swipe (`MobileSwipeActionsRow`, one row out at a time,
   `mobileSidebar/mobileSidebarState.ts`): a session reveals archive, pin and
@@ -539,7 +543,9 @@ dragging a worktree onto a folder is not offered.
   status icon and time; hover actions cover that cluster. The second opens
   with the project's icon and holds the branch (or the space's name) and the
   state cluster: goal glyph, PR (or the zombie warning), permission/question
-  badges, provider logo.
+  badges. It shows no provider logo: the model's provider says nothing about
+  the work, and the maintainer dropped it on 2026-10-25. The linked PRs and
+  issues come from `useSessionRefLines`, which the phone's rows read too.
 - Detailed rows reach past the zones (`detailedZoneRows` keeps its name):
   under a project, every work takes the two lines too. That is the project
   root's sessions and drafts, in its folders as well (a session row's
@@ -564,7 +570,10 @@ The display menu's Show pinned section toggle (`showPinnedSection`,
 activity zone between Chats and In work. It lists pinned top-level,
 unarchived project sessions in the shared lifecycle order; pinned chats stay
 pinned at the top of Chats. A work whose root session is pinned is listed in
-Pinned only. Its sessions also stay in their projects. Search
+Pinned only: it leaves its project (`movedSessionIds`), always, with no
+"also show under projects" choice; the zone is there because the user turned
+it on (maintainer, 2026-10-25). Turned off, pinned sessions stay in their
+projects. Search
 lists each of them once, in the zone (`zoneSessionIds` carries both zones' ids),
 and the rows follow the same render context. Its rows show no pin marker,
 because the header already says they are pinned; In work rows show it only

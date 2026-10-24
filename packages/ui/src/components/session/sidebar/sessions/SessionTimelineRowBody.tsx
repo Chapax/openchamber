@@ -1,7 +1,6 @@
 import React from 'react';
 import { RowMarkTooltip } from './RowMarkTooltip';
 import { Icon } from '@/components/icon/Icon';
-import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { cn } from '@/lib/utils';
 import { PROJECT_ICON_MAP, resolveProjectColor, ProjectIconImage } from '@/lib/projectMeta';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -61,8 +60,6 @@ type Props = {
   /** Jev's "looks done" check: it sits in the time cluster, where the hover
       Done action appears, left of the status dot so the dot stays by the time. */
   doneHint?: React.ReactNode;
-  /** Provider of the session's model; its logo closes the second line. */
-  providerId?: string | null;
   /** Reserves room for permanently shown action buttons on the title line. */
   metaPaddingClass?: string;
   hideMetaOnHoverClass: string;
@@ -131,7 +128,6 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
   goal = null,
   badges,
   doneHint = null,
-  providerId,
   metaPaddingClass,
   hideMetaOnHoverClass,
   actionsReserveClass,
@@ -193,9 +189,6 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
         {goal}
         {zombieIndicator ?? prBadge}
         {badges}
-        {/* PR-icon size: a 16px box leaves the logo's own inner margin
-            wide enough to pull it visibly in from the time above. */}
-        {providerId ? <ProviderLogo providerId={providerId} className="h-3 w-3 flex-shrink-0 opacity-45" /> : null}
       </span>
     </div>
   </div>;

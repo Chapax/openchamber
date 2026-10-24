@@ -4,6 +4,8 @@ import { SessionActivityDuration } from '@/components/session/SessionActivityDur
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import { useSessionAiRenameAction } from '@/components/session/useSessionAiRenameAction';
 import { resolveTooltipBranchLabel } from '@/components/session/sidebar/sessions/sessionNodeItemUtils';
+import { useSessionRefLines } from '@/components/session/sidebar/sessions/useSessionRefLines';
+import { refTintStyle } from '@/lib/source-control/prVisualState';
 import { isMultiLineTimelineContext, sessionExpansionKey, type SessionSidebarRow } from '@/components/session/sidebar/sessionSidebarRowModel';
 import type { SessionNode } from '@/components/session/sidebar/types';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
@@ -93,6 +95,23 @@ export const MobileSessionRow: React.FC<{
     [detailed, row.projectId, row.renderContext],
   ));
   const branch = resolveTooltipBranchLabel(row.secondaryMeta, node.worktree?.branch ?? null);
+  // The PRs and issues linked to the session, as the desktop row shows them:
+  // the one that needs attention first, in its state's colour.
+  const { refLines } = useSessionRefLines(session, node.worktree, false);
+  const primaryRef = refLines[0] ?? null;
+  const moreRefCount = Math.max(0, refLines.length - 1);
+  const refMark = (withLabel: boolean) => (primaryRef ? (
+    <span
+      role="img"
+      aria-label={refLines.map((line) => line.text).join(', ')}
+      className={cn('inline-flex shrink-0 items-center gap-0.5 typography-micro', primaryRef.color ? 'oc-ref-tint' : 'text-muted-foreground')}
+      style={primaryRef.color ? refTintStyle(primaryRef.color) : undefined}
+    >
+      <Icon name={primaryRef.icon} className="size-3" />
+      {withLabel ? <span className="leading-none tabular-nums">{primaryRef.label}</span> : null}
+      {withLabel && moreRefCount > 0 ? <span className="leading-none tabular-nums text-muted-foreground">+{moreRefCount}</span> : null}
+    </span>
+  ) : null);
   const inSpace = row.secondaryMeta?.inSpace === true;
   const toggle = hasChildren && !row.forceExpanded
     ? () => toggleParent(sessionExpansionKey(row.renderContext, row.archived, session.id))
@@ -167,6 +186,7 @@ export const MobileSessionRow: React.FC<{
             <span className="block min-w-0 truncate typography-micro">{branch}</span>
           </> : null}
           <span className="ms-auto flex shrink-0 items-center gap-1.5">
+            {refMark(true)}
             <MobileSessionGoalGlyph session={session} />
             <MobileSessionPendingBadges {...pendingRequests} />
           </span>
@@ -199,6 +219,7 @@ export const MobileSessionRow: React.FC<{
           {pinMarker}
           {stateInSlot ? null : liveState}
           {doneHint}
+          {refMark(false)}
           <MobileSessionGoalGlyph session={session} />
           <MobileSessionPendingBadges {...pendingRequests} />
           {timeSlot}

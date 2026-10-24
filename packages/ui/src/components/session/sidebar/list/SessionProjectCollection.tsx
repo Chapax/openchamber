@@ -395,8 +395,8 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     shownProjectOrderRef.current = orderedSectionsForRender.map((section) => section.project.id);
   }, [orderedSectionsForRender]);
   // Pinned sessions: top-level, unarchived project sessions (Chats keep their
-  // pins in Chats), in the shared lifecycle order; they stay under their
-  // project too. Works in work: a session work when its root or any session
+  // pins in Chats), in the shared lifecycle order; while the Pinned zone
+  // lists them they leave their project. Works in work: a session work when its root or any session
   // nested under it is in work, a worktree work when any of its sessions is.
   // A work whose root session is pinned is listed in Pinned only.
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
@@ -592,14 +592,18 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       ...toWorkEntries(refs),
     ];
   }, [collection.orderedSessions, draftPlacement, timeGrouping, toWorkEntries, workIndex, zoneWorks]);
-  // What leaves its project for the In work block. Kept in place by choice,
-  // it still leaves during a search, which lists each match once.
+  // What leaves its project for the zones. A pinned work always does: the
+  // Pinned zone is shown only by choice, and then the work is there. A work
+  // in work leaves unless kept in place by choice, and still leaves during a
+  // search, which lists each match once.
   const movesWorkOut = !keepWorkInPlace || view.hasSessionSearchQuery;
   const movedSessionIds = React.useMemo(() => {
-    if (!movesWorkOut) return EMPTY_IDS;
-    const ids = zoneWorks.work.flatMap((ref) => ref.kind === 'session' ? [ref.rootSessionId] : []);
+    const ids = zoneWorks.pinned.map((session) => session.id);
+    if (movesWorkOut) {
+      for (const ref of zoneWorks.work) if (ref.kind === 'session') ids.push(ref.rootSessionId);
+    }
     return ids.length > 0 ? new Set(ids) : EMPTY_IDS;
-  }, [movesWorkOut, zoneWorks.work]);
+  }, [movesWorkOut, zoneWorks]);
   const movedGroupKeys = React.useMemo(() => {
     if (!movesWorkOut) return EMPTY_IDS;
     const keys = zoneWorks.work.flatMap((ref) => ref.kind === 'worktree' ? [ref.key] : []);

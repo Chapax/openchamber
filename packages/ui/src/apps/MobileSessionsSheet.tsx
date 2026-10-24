@@ -177,10 +177,25 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const [worktreeDialogProjectId, setWorktreeDialogProjectId] = React.useState<string | null>(null);
   const [editingOrder, setEditingOrder] = React.useState(false);
   const [openId, setOpenId] = React.useState(0);
+  // The iPad's sidebar keeps its search behind a header button, as the
+  // desktop's does; the phone's drawer shows the field at once.
+  const [searchOpen, setSearchOpen] = React.useState(false);
+  const searchShown = variant === 'drawer' || searchOpen;
+  const searchInputRef = React.useRef<HTMLInputElement | null>(null);
+  const toggleSearch = () => {
+    // Closing the field clears its query: no list stays filtered by text
+    // nobody can see.
+    if (searchOpen) setQuery('');
+    setSearchOpen(!searchOpen);
+  };
+  React.useEffect(() => {
+    if (searchOpen && variant === 'sidebar') searchInputRef.current?.focus();
+  }, [searchOpen, variant]);
 
   React.useEffect(() => {
     if (!open) {
       setQuery('');
+      setSearchOpen(false);
       setEditingOrder(false);
       setEditingProjectId(null);
       useMobileSidebarRowsStore.getState().reset();
@@ -396,11 +411,13 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       <div className="flex min-h-0 flex-1 flex-col">
         {/* The list scrolls under the search field: the list is virtualized
             in its own scroller, which the field cannot join. */}
-        {!editingOrder && !empty ? (
-          <div className="shrink-0 px-3 pb-2 pt-1">
+        {!editingOrder && !empty && searchShown ? (
+          <div className={cn('shrink-0 px-3 pb-2', variant === 'sidebar' ? 'pt-2' : 'pt-1')}>
             <SessionSearchInput
+              inputRef={searchInputRef}
               value={query}
               onSearch={setQuery}
+              onClose={variant === 'sidebar' ? toggleSearch : undefined}
               active={open}
               mobile
               placeholder={t('mobile.sessions.search.placeholder')}
@@ -447,93 +464,41 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
           </MobileSidebarActionsProvider>
         </div>
 
-        {/* App-level footer: instance on the left (Capacitor), settings —
-            plus a pending web update — on the right. Bottom placement keeps
-            the header for list actions and stays thumb-reachable. */}
+        {/* App-level footer: the connected instance (Capacitor) on the left;
+            on the right the pages opened less often behind "More", then a
+            pending web update, the overview, the issues board and Settings.
+            Settings is the one filled button; the rest are flat, as the
+            header's. Bottom placement keeps the header for list actions and
+            stays thumb-reachable. */}
         {footer ? (
           <div
             className="flex shrink-0 items-center justify-between gap-2 border-t border-border/70 px-3 pt-1.5"
             style={{ paddingBottom: 'calc(0.375rem + var(--oc-safe-area-bottom, 0px))' }}
           >
-            {footer.instanceLabel && footer.onOpenInstances ? (
-              <Button
-                type="button"
-                variant="info"
-                size="lg"
-                className="min-w-0 shrink justify-start"
-                onClick={footer.onOpenInstances}
-                aria-label={t('mobile.menu.instances')}
-                style={{ touchAction: 'manipulation' }}
-              >
-                <Icon name="server" className="size-[18px]" />
-                <span className="block min-w-0 truncate">{footer.instanceLabel}</span>
-              </Button>
-            ) : (
-              <div className="min-w-0 flex-1" />
-            )}
+            <div className="flex min-w-0 items-center">
+              {footer.instanceLabel && footer.onOpenInstances ? (
+                <Button
+                  type="button"
+                  variant="info"
+                  size="lg"
+                  className="min-w-0 shrink justify-start"
+                  onClick={footer.onOpenInstances}
+                  aria-label={t('mobile.menu.instances')}
+                  style={{ touchAction: 'manipulation' }}
+                >
+                  <Icon name="server" className="size-[18px]" />
+                  <span className="block min-w-0 truncate">{footer.instanceLabel}</span>
+                </Button>
+              ) : null}
+            </div>
             <div className="flex shrink-0 items-center gap-1">
-              {footer.onOpenUpdate ? (
-                <Button
-                  type="button"
-                  variant="default"
-                  size="lg"
-                  className="w-10 px-0"
-                  onClick={footer.onOpenUpdate}
-                  aria-label={t('mobile.menu.update')}
-                  title={t('mobile.menu.update')}
-                  style={{ touchAction: 'manipulation' }}
-                >
-                  <Icon name="download" className="size-5" />
-                  <span className="absolute inset-e-2 top-2 inline-flex size-2 rounded-full bg-primary" aria-hidden />
-                </Button>
-              ) : null}
-              {footer.onOpenOverview ? (
-                <Button
-                  type="button"
-                  variant="default"
-                  size="lg"
-                  className="w-10 px-0"
-                  onClick={footer.onOpenOverview}
-                  aria-label={t('overview.title')}
-                  title={t('overview.title')}
-                  style={{ touchAction: 'manipulation' }}
-                >
-                  <Icon name="compass-3" className="size-5" />
-                </Button>
-              ) : null}
-              <Button
-                type="button"
-                variant="default"
-                size="lg"
-                className="w-10 px-0"
-                onClick={footer.onOpenSourceBoard}
-                aria-label={t('sourceBoard.title')}
-                title={t('sourceBoard.title')}
-                style={{ touchAction: 'manipulation' }}
-              >
-                <Icon name="git-pull-request" className="size-5" />
-              </Button>
-              <Button
-                type="button"
-                variant="default"
-                size="lg"
-                className="w-10 px-0"
-                onClick={footer.onOpenSettings}
-                aria-label={t('mobile.menu.settings')}
-                title={t('mobile.menu.settings')}
-                style={{ touchAction: 'manipulation' }}
-              >
-                <Icon name="settings-3" className="size-5" />
-              </Button>
-              {/* The pages opened less often share one menu, so the instance
-                  name keeps the width. */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
                     type="button"
-                    variant="default"
+                    variant="chip"
                     size="lg"
-                    className="w-10 px-0"
+                    className="w-10 shrink-0 px-0"
                     aria-label={t('mobile.sessions.footer.more')}
                     title={t('mobile.sessions.footer.more')}
                     style={{ touchAction: 'manipulation' }}
@@ -562,6 +527,59 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
+              {footer.onOpenUpdate ? (
+                <Button
+                  type="button"
+                  variant="chip"
+                  size="lg"
+                  className="w-10 px-0"
+                  onClick={footer.onOpenUpdate}
+                  aria-label={t('mobile.menu.update')}
+                  title={t('mobile.menu.update')}
+                  style={{ touchAction: 'manipulation' }}
+                >
+                  <Icon name="download" className="size-5" />
+                  <span className="absolute inset-e-2 top-2 inline-flex size-2 rounded-full bg-primary" aria-hidden />
+                </Button>
+              ) : null}
+              {footer.onOpenOverview ? (
+                <Button
+                  type="button"
+                  variant="chip"
+                  size="lg"
+                  className="w-10 px-0"
+                  onClick={footer.onOpenOverview}
+                  aria-label={t('overview.title')}
+                  title={t('overview.title')}
+                  style={{ touchAction: 'manipulation' }}
+                >
+                  <Icon name="compass-3" className="size-5" />
+                </Button>
+              ) : null}
+              <Button
+                type="button"
+                variant="chip"
+                size="lg"
+                className="w-10 px-0"
+                onClick={footer.onOpenSourceBoard}
+                aria-label={t('sourceBoard.title')}
+                title={t('sourceBoard.title')}
+                style={{ touchAction: 'manipulation' }}
+              >
+                <Icon name="git-pull-request" className="size-5" />
+              </Button>
+              <Button
+                type="button"
+                variant="default"
+                size="lg"
+                className="w-10 px-0"
+                onClick={footer.onOpenSettings}
+                aria-label={t('mobile.menu.settings')}
+                title={t('mobile.menu.settings')}
+                style={{ touchAction: 'manipulation' }}
+              >
+                <Icon name="settings-3" className="size-5" />
+              </Button>
             </div>
           </div>
         ) : null}
@@ -602,9 +620,24 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   if (variant === 'sidebar') {
     return (
       <div className="flex h-full min-h-0 flex-col">
-        {/* No title: the list below says what this is, and the actions need the width. */}
-        <div className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center justify-end gap-2 border-b border-border/70 px-3">
-          <div className="flex shrink-0 items-center gap-2">{trailingActions}</div>
+        {/* No title: the list below says what this is, and the actions need
+            the width. Search opens from the leading button, as on the desktop. */}
+        <div className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-2 border-b border-border/70 px-3">
+          {!editingOrder && !empty ? (
+            <Button
+              type="button"
+              variant="chip"
+              size="sm"
+              aria-label={t('sessions.sidebar.header.actions.searchSessions')}
+              title={t('sessions.sidebar.header.actions.searchSessions')}
+              aria-pressed={searchOpen}
+              onClick={toggleSearch}
+              style={{ touchAction: 'manipulation' }}
+            >
+              <Icon name="search" className="size-4" />
+            </Button>
+          ) : null}
+          <div className="ms-auto flex shrink-0 items-center gap-2">{trailingActions}</div>
         </div>
         {surfaceContent}
       </div>
