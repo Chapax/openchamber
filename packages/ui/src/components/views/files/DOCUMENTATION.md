@@ -193,7 +193,8 @@ on its page, a player keeps playing, a font stays registered. The server
 checks the token when a request starts, so a held URL keeps working for the
 document it already loads. A player asks for more ranges later, and one asked
 for after the token expired gets a 401; `MediaArtifact` then asks `renew` for
-a URL with a fresh token and resumes at the same position and play state. One
+a URL with a fresh token and resumes at the same position, speed and play
+state. One
 renewal per ten seconds; a renewal that returns the same URL, or fails, shows
 "cannot be played". A file changed on disk bumps the revision, which gives the
 preview a new URL and loads the new bytes.

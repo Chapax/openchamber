@@ -16,7 +16,7 @@ const RENEW_RETRY_WINDOW_MS = 10_000;
  * The player fetches byte ranges as it plays and seeks, each with the URL token
  * in `src`. A range asked for after that token expired fails, so the first
  * error asks `renewSrc` for a URL with a fresh token and resumes at the same
- * position. A renewal that returns the same URL means the token was not the
+ * position and speed. A renewal that returns the same URL means the token was not the
  * problem.
  */
 export const MediaArtifact: React.FC<{
@@ -32,7 +32,7 @@ export const MediaArtifact: React.FC<{
   const [dimensions, setDimensions] = React.useState<{ width: number; height: number } | null>(null);
   const [failed, setFailed] = React.useState(false);
   const lastRenewAt = React.useRef(0);
-  const resume = React.useRef<{ time: number; playing: boolean } | null>(null);
+  const resume = React.useRef<{ time: number; rate: number; playing: boolean } | null>(null);
 
   const onLoadedMetadata = (event: React.SyntheticEvent<HTMLMediaElement>) => {
     const media = event.currentTarget;
@@ -44,6 +44,7 @@ export const MediaArtifact: React.FC<{
     if (!saved) return;
     resume.current = null;
     media.currentTime = saved.time;
+    media.playbackRate = saved.rate;
     if (saved.playing) void media.play().catch(() => {});
   };
 
@@ -55,7 +56,7 @@ export const MediaArtifact: React.FC<{
     }
     lastRenewAt.current = now;
     const media = event.currentTarget;
-    resume.current = { time: media.currentTime, playing: !media.paused };
+    resume.current = { time: media.currentTime, rate: media.playbackRate, playing: !media.paused };
     const failedSrc = src;
     renewSrc().then((renewed) => {
       if (renewed === failedSrc) setFailed(true);

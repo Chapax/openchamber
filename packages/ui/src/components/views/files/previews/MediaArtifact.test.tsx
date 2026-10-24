@@ -53,7 +53,7 @@ afterEach(async () => {
 });
 
 describe('MediaArtifact', () => {
-  test('a failed request gets a fresh URL and resumes at the same position', async () => {
+  test('a failed request gets a fresh URL and resumes at the same position and speed', async () => {
     let renewals = 0;
     await render('http://h/api/fs/raw?path=a&oc_url_token=old', async () => {
       renewals += 1;
@@ -62,6 +62,7 @@ describe('MediaArtifact', () => {
     const element = audio();
     if (!element) throw new Error('no audio element');
     playingAt(element, 123);
+    element.playbackRate = 1.5;
     let played = 0;
     element.play = async () => { played += 1; };
 
@@ -71,9 +72,12 @@ describe('MediaArtifact', () => {
     expect(element.getAttribute('src')).toBe('http://h/api/fs/raw?path=a&oc_url_token=new');
     expect(container?.textContent).not.toContain(UNPLAYABLE);
 
+    // A new src resets position and speed, as the media load algorithm does.
     element.currentTime = 0;
+    element.playbackRate = 1;
     await act(async () => { element.dispatchEvent(new Event('loadedmetadata')); });
     expect(element.currentTime).toBe(123);
+    expect(element.playbackRate).toBe(1.5);
     expect(played).toBe(1);
   });
 
