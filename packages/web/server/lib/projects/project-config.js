@@ -1,6 +1,7 @@
 import { DateTime, IANAZone } from 'luxon';
 import { CronExpressionParser } from 'cron-parser';
 
+import { isBoolean, isRecord } from '../shared/guards.js';
 import { projectConfigFileStemOf, projectPathFromId } from './project-id.js';
 import {
   DEFAULT_PLANS_DIR,
@@ -23,6 +24,7 @@ export const MAX_TASK_NAME_LENGTH = 80;
 const MAX_TASK_PROMPT_LENGTH = 20_000;
 const MAX_CRON_LENGTH = 200;
 const MAX_LAST_ERROR_LENGTH = 2_000;
+const MAX_BASE_BRANCH_LENGTH = 200;
 
 const asNonEmptyString = (value) => {
   if (typeof value !== 'string') {
@@ -284,8 +286,23 @@ const normalizeState = (value, fallback) => {
   const lastSessionId = asNonEmptyString(source.lastSessionId);
   const lastErrorRaw = asNonEmptyString(source.lastError);
   const lastError = lastErrorRaw ? clampLength(lastErrorRaw, MAX_LAST_ERROR_LENGTH) : undefined;
+  const lastIsolated = isBoolean(source.lastIsolated) ? source.lastIsolated : undefined;
+  const lastBranch = asNonEmptyString(source.lastBranch);
+  // `lastWorktree` carries the cleanup facts for isolated runs: the worktree
+  // path, its branch, and the resolved base commit. All three must be present
+  // for cleanup to reason about it, so a partial record is dropped.
+  const lastWorktree = isRecord(source.lastWorktree)
+    ? {
+        path: asNonEmptyString(source.lastWorktree.path),
+        branch: asNonEmptyString(source.lastWorktree.branch),
+        baseRef: asNonEmptyString(source.lastWorktree.baseRef),
+      }
+    : undefined;
+  const lastWorktreeOut = lastWorktree?.path && lastWorktree.branch && lastWorktree.baseRef
+    ? lastWorktree
+    : undefined;
 
-  return {
+  const normalizedState = {
     createdAt: typeof source.createdAt === 'number' && Number.isFinite(source.createdAt)
       ? Math.max(0, Math.round(source.createdAt))
       : Date.now(),
@@ -300,6 +317,10 @@ const normalizeState = (value, fallback) => {
     ...(lastSessionId ? { lastSessionId } : {}),
     ...(lastError ? { lastError } : {}),
   };
+  if (isBoolean(lastIsolated)) normalizedState.lastIsolated = lastIsolated;
+  if (lastBranch) normalizedState.lastBranch = lastBranch;
+  if (lastWorktreeOut) normalizedState.lastWorktree = lastWorktreeOut;
+  return normalizedState;
 };
 
 const normalizeTaskForStorage = (value, options) => {
@@ -344,6 +365,14 @@ const normalizeTaskForStorage = (value, options) => {
   if (targetSessionId && !/^[A-Za-z0-9_-]{4,128}$/.test(targetSessionId)) throw new Error('targetSessionId is invalid');
   const execution = normalizeExecution(value.execution, targetSessionId);
 
+  // Isolation: run in a fresh worktree on a chosen branch. These fields are
+  // UI/JSON-only (not in loop files); existing tasks without them read as
+  // not isolated. Non-git projects fall back to running in the project dir.
+  const isolateRuns = value.isolateRuns === true;
+  const baseBranchRaw = asNonEmptyString(value.baseBranch);
+  const baseBranch = isolateRuns && baseBranchRaw ? clampLength(baseBranchRaw, MAX_BASE_BRANCH_LENGTH) : undefined;
+  if (baseBranchRaw && !isolateRuns) throw new Error('baseBranch requires isolateRuns: true');
+
   // Loop provenance: absolute path of the `.agents/loops/*.md` file driving
   // this task, when any. Preserved on every write so the scheduler can detect
   // removed loop files across restarts. Unknown to the UI model.
@@ -367,6 +396,8 @@ const normalizeTaskForStorage = (value, options) => {
     ...(loopFile ? { loopFile } : {}),
   };
   if (targetSessionId) storedTask.targetSessionId = targetSessionId;
+  if (isBoolean(value.isolateRuns)) storedTask.isolateRuns = value.isolateRuns;
+  if (baseBranch) storedTask.baseBranch = baseBranch;
   return storedTask;
 };
 

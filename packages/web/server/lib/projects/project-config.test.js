@@ -979,3 +979,118 @@ describe('project-config loop reconciliation', () => {
     }
   });
 });
+
+describe('project-config scheduled task isolation fields', () => {
+  const baseTask = {
+    name: 'Isolated nightly',
+    enabled: true,
+    schedule: { kind: 'daily', time: '09:00', timezone: 'UTC' },
+    execution: { prompt: 'Run isolated', providerID: 'openai', modelID: 'gpt-4.1' },
+  };
+
+  it('round-trips isolateRuns and baseBranch', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      const saved = await runtime.upsertScheduledTask('project-test', {
+        ...baseTask,
+        isolateRuns: true,
+        baseBranch: 'develop',
+      });
+      const reloaded = await runtime.listScheduledTasks('project-test');
+      expect(reloaded[0]).toMatchObject({ isolateRuns: true, baseBranch: 'develop' });
+
+      // Updating without the fields keeps them (a partial write must not drop them).
+      await runtime.upsertScheduledTask('project-test', { ...reloaded[0], name: 'Renamed' });
+      const after = await runtime.listScheduledTasks('project-test');
+      expect(after[0]).toMatchObject({ name: 'Renamed', isolateRuns: true, baseBranch: 'develop' });
+      expect(saved.task.id).toBe(after[0].id);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('reads a task without the fields as not isolated', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      await runtime.upsertScheduledTask('project-test', baseTask);
+      const [task] = await runtime.listScheduledTasks('project-test');
+      expect(task.isolateRuns).toBeUndefined();
+      expect(task.baseBranch).toBeUndefined();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('rejects baseBranch without isolateRuns', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      await expect(runtime.upsertScheduledTask('project-test', {
+        ...baseTask,
+        baseBranch: 'develop',
+      })).rejects.toThrow('baseBranch requires isolateRuns: true');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('records and clears the per-run isolation state', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      const saved = await runtime.upsertScheduledTask('project-test', { ...baseTask, isolateRuns: true });
+      await runtime.updateScheduledTaskState('project-test', saved.task.id, {
+        lastStatus: 'success',
+        lastIsolated: true,
+        lastBranch: 'isolated-nightly-20261025-0300',
+        lastWorktree: { path: '/work/tree', branch: 'isolated-nightly-20261025-0300', baseRef: 'abc1234' },
+      });
+      const [isolated] = await runtime.listScheduledTasks('project-test');
+      expect(isolated.state).toMatchObject({
+        lastIsolated: true,
+        lastBranch: 'isolated-nightly-20261025-0300',
+        lastWorktree: { path: '/work/tree', branch: 'isolated-nightly-20261025-0300', baseRef: 'abc1234' },
+      });
+
+      // A non-isolated run clears the record; a partial worktree record is dropped.
+      await runtime.updateScheduledTaskState('project-test', saved.task.id, {
+        lastStatus: 'success',
+        lastIsolated: false,
+        lastBranch: undefined,
+        lastWorktree: undefined,
+      });
+      const [plain] = await runtime.listScheduledTasks('project-test');
+      expect(plain.state.lastIsolated).toBe(false);
+      expect(plain.state.lastBranch).toBeUndefined();
+      expect(plain.state.lastWorktree).toBeUndefined();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('preserves the fields across loop adoption', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      await runtime.upsertScheduledTask('project-test', {
+        ...baseTask,
+        name: 'daily-digest',
+        isolateRuns: true,
+        baseBranch: 'develop',
+      });
+      const adopted = await runtime.reconcileLoopTasks('project-test', [{
+        scope: 'project',
+        filePath: '/repo/.agents/loops/daily-digest.md',
+        definition: {
+          name: 'daily-digest',
+          enabled: true,
+          schedule: { kind: 'cron', cron: '0 9 * * *', timezone: 'UTC' },
+          execution: { prompt: 'Loop prompt for daily-digest', providerID: 'openai', modelID: 'gpt-4.1' },
+        },
+      }]);
+      expect(adopted.find((task) => task.name === 'daily-digest')).toMatchObject({
+        isolateRuns: true,
+        baseBranch: 'develop',
+      });
+    } finally {
+      await cleanup();
+    }
+  });
+});

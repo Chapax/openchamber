@@ -78,6 +78,8 @@ const sessionCommandMock = vi.fn(async () => undefined);
 const commandListMock = vi.fn(async () => ({ data: [] }));
 globalThis.__openchamberCreateWorktreeMock = createWorktreeMock;
 globalThis.__openchamberGetWorktreeBootstrapStatusMock = getWorktreeBootstrapStatusMock;
+const resolveRepositoryGitPathsMock = vi.fn(async () => ({ supported: true, topLevel: '/repo' }));
+globalThis.__openchamberResolveRepositoryGitPathsMock = resolveRepositoryGitPathsMock;
 const defaultPrimaryWorktreeRoot = async (directory) => ({ root: directory === '/repo/worktrees/side-task' ? '/repo/app' : directory });
 const resolvePrimaryWorktreeRootMock = vi.fn(defaultPrimaryWorktreeRoot);
 globalThis.__openchamberResolvePrimaryWorktreeRootMock = resolvePrimaryWorktreeRootMock;
@@ -122,6 +124,7 @@ vi.mock('../git/index.js', () => ({
   createWorktree: (...args) => globalThis.__openchamberCreateWorktreeMock(...args),
   getWorktreeBootstrapStatus: (...args) => globalThis.__openchamberGetWorktreeBootstrapStatusMock(...args),
   resolvePrimaryWorktreeRoot: (...args) => globalThis.__openchamberResolvePrimaryWorktreeRootMock(...args),
+  resolveRepositoryGitPaths: (...args) => globalThis.__openchamberResolveRepositoryGitPathsMock(...args),
   // Only moving a session into a worktree reaches these; the route tests
   // inject their own through the service dependencies.
   removeWorktree: vi.fn(),
@@ -250,6 +253,8 @@ describe('openchamber session routes', () => {
     resolvePrimaryWorktreeRootMock.mockImplementation(defaultPrimaryWorktreeRoot);
     createWorktreeMock.mockClear();
     hydrateWorktreeCheckoutMock.mockClear();
+    resolveRepositoryGitPathsMock.mockReset();
+    resolveRepositoryGitPathsMock.mockImplementation(async () => ({ supported: true, topLevel: '/repo' }));
     getWorktreeBootstrapStatusMock.mockClear();
     getWorktreeBootstrapStatusMock.mockImplementation(async () => ({
       status: 'ready',
@@ -1925,5 +1930,93 @@ describe('openchamber session service directory resolution', () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+  const createWorktreeService = (overrides = {}) => createOpenChamberSessionService({
+    readSettingsFromDiskMigrated: async () => ({ projects: [{ id: 'proj_1', path: '/repo/app' }] }),
+    sanitizeProjects: (projects) => projects,
+    validateDirectoryPath: async (directory) => ({ ok: true, directory }),
+    buildOpenCodeUrl: (route) => `http://opencode.test${route}`,
+    getOpenCodeAuthHeaders: () => ({}),
+    waitForOpenCodeReady: vi.fn(async () => undefined),
+    worktreeBootstrapStore,
+    hydrateWorktreeCheckout: hydrateWorktreeCheckoutMock,
+    archiveStore: createMemoryArchiveStore(),
+    sessionMetadataStore: createMemorySessionMetadataStore(),
+    getBranches: vi.fn(async () => ({ all: [], defaultBranches: {} })),
+    resolveWorktreeTopLevel: vi.fn(async (directory) => ({ root: directory, prefix: '' })),
+    validateWorktreeDirectory: vi.fn(async () => ({ valid: true, insideWorktreeRoot: true })),
+    ...overrides,
+  });
+
+  const resetWorktreeMocks = ({ supported = true } = {}) => {
+    createWorktreeMock.mockReset();
+    hydrateWorktreeCheckoutMock.mockReset();
+    hydrateWorktreeCheckoutMock.mockImplementation(async () => ({ status: 'not-needed', submodules: [], lfs: [] }));
+    getWorktreeBootstrapStatusMock.mockReset();
+    getWorktreeBootstrapStatusMock.mockImplementation(async () => ({
+      status: 'ready', phase: 'setup-ready', error: null, updatedAt: Date.now(),
+    }));
+    resolveRepositoryGitPathsMock.mockReset();
+    resolveRepositoryGitPathsMock.mockImplementation(async () => ({ supported, topLevel: '/repo' }));
+    sessionCreateMock.mockClear();
+    sessionPromptMock.mockClear();
+  };
+
+  it('createRunWorktree creates a worktree, waits for the bootstrap, and creates no session', async () => {
+    resetWorktreeMocks();
+    createWorktreeMock.mockResolvedValue({
+      head: 'abc123', name: 'nightly-20261025', branch: 'nightly-20261025', path: '/repo/worktrees/nightly-20261025',
+    });
+    const service = createWorktreeService();
+
+    const result = await service.createRunWorktree({
+      projectId: 'proj_1',
+      worktree: { name: 'nightly-20261025', branchName: 'nightly-20261025', startRef: 'develop', startCommand: 'bun install' },
+    });
+
+    expect(createWorktreeMock).toHaveBeenCalledWith('/repo/app', {
+      mode: 'new',
+      name: 'nightly-20261025',
+      branchName: 'nightly-20261025',
+      startRef: 'develop',
+      startCommand: 'bun install',
+    }, {
+      bootstrapStore: worktreeBootstrapStore,
+      hydrateCheckout: expect.any(Function),
+    });
+    expect(getWorktreeBootstrapStatusMock).toHaveBeenCalledWith(
+      '/repo/worktrees/nightly-20261025',
+      { bootstrapStore: worktreeBootstrapStore },
+    );
+    expect(result).toMatchObject({ ok: true, directory: '/repo/worktrees/nightly-20261025' });
+    expect(result.worktree.path).toBe('/repo/worktrees/nightly-20261025');
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+    expect(sessionPromptMock).not.toHaveBeenCalled();
+  });
+
+  it('createRunWorktree answers not-a-git-repository without creating anything', async () => {
+    resetWorktreeMocks({ supported: false });
+    const service = createWorktreeService();
+
+    const result = await service.createRunWorktree({ projectId: 'proj_1', worktree: { name: 'nightly' } });
+
+    expect(result).toEqual({ ok: false, reason: 'not-a-git-repository' });
+    expect(createWorktreeMock).not.toHaveBeenCalled();
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+  });
+
+  it('createRunWorktree propagates a bootstrap failure and creates no session', async () => {
+    resetWorktreeMocks();
+    createWorktreeMock.mockResolvedValue({
+      head: 'abc123', name: 'nightly', branch: 'nightly', path: '/repo/worktrees/nightly',
+    });
+    getWorktreeBootstrapStatusMock.mockResolvedValue({
+      status: 'failed', phase: 'setup-ready', error: 'setup command failed', updatedAt: Date.now(),
+    });
+    const service = createWorktreeService();
+
+    await expect(service.createRunWorktree({ projectId: 'proj_1', worktree: { name: 'nightly' } }))
+      .rejects.toThrow(/setup command failed|bootstrap/i);
+    expect(sessionCreateMock).not.toHaveBeenCalled();
   });
 });

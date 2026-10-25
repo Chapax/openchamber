@@ -30,6 +30,9 @@ import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariant
 import { useGlobalSessionsStore, refreshGlobalSessions } from '@/stores/useGlobalSessionsStore';
 import { useAllLiveSessions } from '@/sync/sync-context';
 import { SettingsStackedField } from '@/components/sections/shared/SettingsSection';
+import { BranchSelector } from '@/components/multirun/BranchSelector';
+import { checkIsGitRepository } from '@/lib/gitApi';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 
 const WEEKDAY_INDEXES = [0, 1, 2, 3, 4, 5, 6] as const;
 
@@ -488,6 +491,10 @@ type ScheduledTaskDraft = {
     permissionAutoAccept: boolean;
   };
   state?: ScheduledTask['state'];
+  /** Run the task in a fresh worktree on a chosen branch. */
+  isolateRuns: boolean;
+  /** The base branch the worktree branches from when `isolateRuns` is true. */
+  baseBranch: string;
 };
 
 const normalizeDraftTimes = (task: ScheduledTask | null): string[] => {
@@ -506,7 +513,8 @@ const normalizeDraftTimes = (task: ScheduledTask | null): string[] => {
   return unique.length > 0 ? unique : ['09:00'];
 };
 
-const toDraft = (
+// oxlint-disable-next-line react/only-export-components -- Pure draft/payload helpers, tested next to the dialog they belong to
+export const toDraft = (
   task: ScheduledTask | null,
   defaults: {
     providerID: string;
@@ -542,6 +550,8 @@ const toDraft = (
         goalTokenBudget: null,
         permissionAutoAccept: false,
       },
+      isolateRuns: false,
+      baseBranch: '',
     };
   }
 
@@ -586,6 +596,8 @@ const toDraft = (
       permissionAutoAccept: task.execution.permissionAutoAccept === true,
     },
     state: task.state,
+    isolateRuns: task.isolateRuns === true,
+    baseBranch: task.baseBranch || '',
   };
 };
 
@@ -637,6 +649,55 @@ const validateDraft = (draft: ScheduledTaskDraft, t: ReturnType<typeof useI18n>[
 const dedupeSortTimes = (times: string[]) => {
   const filtered = times.filter((value) => /^([01]\d|2[0-3]):([0-5]\d)$/.test(value));
   return Array.from(new Set(filtered)).sort((a, b) => a.localeCompare(b));
+};
+
+/**
+ * The save payload for a draft. Isolation only reaches a new-session task, and
+ * the base branch travels only with isolation on — an off toggle must not
+ * strand a branch the server would reject.
+ */
+// oxlint-disable-next-line react/only-export-components -- Pure draft/payload helpers, tested next to the dialog they belong to
+export const toTaskPayload = (draft: ScheduledTaskDraft): Partial<ScheduledTask> => {
+  const payload: Partial<ScheduledTask> = {
+    ...(draft.id ? { id: draft.id } : {}),
+    name: draft.name.trim(),
+    targetSessionId: draft.sessionMode === 'existing' ? draft.targetSessionId : '',
+    enabled: draft.enabled,
+    schedule: {
+      kind: draft.schedule.kind,
+      timezone: draft.schedule.timezone.trim(),
+      ...(draft.schedule.kind === 'cron'
+        ? { cron: draft.schedule.cronExpression.trim() }
+        : draft.schedule.kind === 'once'
+          ? {
+              date: draft.schedule.onceDate,
+              time: draft.schedule.onceTime,
+            }
+          : {
+              times: dedupeSortTimes(draft.schedule.times),
+              ...(draft.schedule.kind === 'weekly' ? { weekdays: draft.schedule.weekdays } : {}),
+            }),
+    },
+    execution: {
+      prompt: draft.execution.prompt,
+      ...(draft.execution.useDefaults ? { useDefaults: true } : {}),
+      providerID: draft.execution.providerID,
+      modelID: draft.execution.modelID,
+      ...(draft.execution.variant.trim() ? { variant: draft.execution.variant.trim() } : {}),
+      ...(draft.execution.agent.trim() ? { agent: draft.execution.agent.trim() } : {}),
+      ...(draft.execution.permissionAutoAccept ? { permissionAutoAccept: true } : {}),
+      ...(draft.execution.goalEnabled ? { goalEnabled: true } : {}),
+      ...(draft.execution.goalEnabled && draft.execution.goalTokenBudget
+        ? { goalTokenBudget: draft.execution.goalTokenBudget }
+        : {}),
+    },
+  };
+  if (draft.sessionMode === 'new' && draft.isolateRuns) {
+    payload.isolateRuns = true;
+    if (draft.baseBranch.trim()) payload.baseBranch = draft.baseBranch.trim();
+  }
+  if (draft.state && draft.sessionMode === 'new') payload.state = draft.state;
+  return payload;
 };
 
 const CronScheduleSection: React.FC<{
@@ -810,6 +871,25 @@ export function ScheduledTaskEditorDialog(props: {
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const weekStartPreference = useUIStore((state) => state.weekStartPreference);
   const isMobile = useUIStore((state) => state.isMobile);
+  // Git check: project must be a git repository for isolation controls to appear.
+  // For chats scope (CHAT_DRAFT_PROJECT_ID) there's no project entry → not git.
+  const projects = useProjectsStore((state) => state.projects);
+  const projectPath = React.useMemo(() => {
+    const p = projects.find((pr) => pr.id === props.projectId);
+    return p?.path ?? null;
+  }, [projects, props.projectId]);
+  const [gitRepo, setGitRepo] = React.useState<boolean>(false);
+  React.useEffect(() => {
+    if (!projectPath) {
+      setGitRepo(false);
+      return;
+    }
+    let cancelled = false;
+    checkIsGitRepository(projectPath).then((isGit) => {
+      if (!cancelled) setGitRepo(isGit);
+    });
+    return () => { cancelled = true; };
+  }, [projectPath]);
 
   const [draft, setDraft] = React.useState<ScheduledTaskDraft>(() =>
     toDraft(task, {
@@ -1216,41 +1296,7 @@ export function ScheduledTaskEditorDialog(props: {
       return;
     }
 
-    const payload: Partial<ScheduledTask> = {
-      ...(draft.id ? { id: draft.id } : {}),
-      name: draft.name.trim(),
-      targetSessionId: draft.sessionMode === 'existing' ? draft.targetSessionId : '',
-      enabled: draft.enabled,
-      schedule: {
-        kind: draft.schedule.kind,
-        timezone: draft.schedule.timezone.trim(),
-        ...(draft.schedule.kind === 'cron'
-          ? { cron: draft.schedule.cronExpression.trim() }
-          : draft.schedule.kind === 'once'
-            ? {
-                date: draft.schedule.onceDate,
-                time: draft.schedule.onceTime,
-            }
-            : {
-                times: dedupeSortTimes(draft.schedule.times),
-                ...(draft.schedule.kind === 'weekly' ? { weekdays: draft.schedule.weekdays } : {}),
-              }),
-      },
-      execution: {
-        prompt: draft.execution.prompt,
-        ...(draft.execution.useDefaults ? { useDefaults: true } : {}),
-        providerID: draft.execution.providerID,
-        modelID: draft.execution.modelID,
-        ...(draft.execution.variant.trim() ? { variant: draft.execution.variant.trim() } : {}),
-        ...(draft.execution.agent.trim() ? { agent: draft.execution.agent.trim() } : {}),
-        ...(draft.execution.permissionAutoAccept ? { permissionAutoAccept: true } : {}),
-        ...(draft.execution.goalEnabled ? { goalEnabled: true } : {}),
-        ...(draft.execution.goalEnabled && draft.execution.goalTokenBudget
-          ? { goalTokenBudget: draft.execution.goalTokenBudget }
-          : {}),
-      },
-    };
-    if (draft.state && draft.sessionMode === 'new') payload.state = draft.state;
+    const payload = toTaskPayload(draft);
 
     setSaving(true);
     try {
@@ -1785,6 +1831,41 @@ export function ScheduledTaskEditorDialog(props: {
               />
             ) : null}
           </div>
+          ) : null}
+
+          {draft.sessionMode === 'new' && gitRepo ? (
+            <SettingsStackedField label={t('sessions.scheduledTasks.editor.isolation.title')} info={t('sessions.scheduledTasks.editor.isolation.hint')}>
+              <div className="flex flex-col gap-3">
+                <label className="inline-flex cursor-pointer items-center gap-2">
+                  <Checkbox
+                    checked={draft.isolateRuns}
+                    onChange={(next) => setDraft((prev) => ({ ...prev, isolateRuns: next }))}
+                    ariaLabel={t('sessions.scheduledTasks.editor.isolation.toggleAria')}
+                  />
+                  <span className="typography-meta">{t('sessions.scheduledTasks.editor.isolation.toggleLabel')}</span>
+                </label>
+                {draft.isolateRuns ? (
+                  <>
+                    <div className="flex flex-col gap-1">
+                      <span className="typography-meta text-muted-foreground">
+                        {t('sessions.scheduledTasks.editor.baseBranch.label')}
+                      </span>
+                      <BranchSelector
+                        directory={projectPath}
+                        value={draft.baseBranch}
+                        onChange={(branch) => setDraft((prev) => ({ ...prev, baseBranch: branch }))}
+                        id="sched-base-branch"
+                      />
+                    </div>
+                    {draft.baseBranch ? null : (
+                      <span className="typography-meta text-muted-foreground">
+                        {t('sessions.scheduledTasks.editor.baseBranch.empty')}
+                      </span>
+                    )}
+                  </>
+                ) : null}
+              </div>
+            </SettingsStackedField>
           ) : null}
     </div>
   );

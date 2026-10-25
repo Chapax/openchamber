@@ -37,6 +37,12 @@ export type ScheduledTask = {
     goalTokenBudget?: number;
     permissionAutoAccept?: boolean;
   };
+  /** Run the task in a fresh worktree on a chosen branch. Absent or false
+   *  means the task runs in the project directory as before. */
+  isolateRuns?: boolean;
+  /** The base branch the worktree branches from when `isolateRuns` is true.
+   *  Empty or missing means the current HEAD at run time (`startRef: 'HEAD'`). */
+  baseBranch?: string;
   state: {
     createdAt: number;
     updatedAt: number;
@@ -46,6 +52,20 @@ export type ScheduledTask = {
     lastDurationMs?: number;
     lastSessionId?: string;
     nextRunAt?: number;
+    /** Whether the last run executed isolated in a worktree. */
+    lastIsolated?: boolean;
+    /** The branch the last run used when isolated. */
+    lastBranch?: string;
+    /** Worktree metadata from the last isolated run for cleanup.
+     *  All fields are present only when `lastIsolated` is true and the
+     *  worktree exists. The `baseRef` is the resolved commit sha at creation,
+     *  not the branch name, so a moving base branch cannot make an old worktree
+     *  look clean. */
+    lastWorktree?: {
+      path: string;
+      branch: string;
+      baseRef: string;
+    };
   };
 };
 

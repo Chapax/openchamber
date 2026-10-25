@@ -502,3 +502,221 @@ describe('scheduled-tasks runtime chats scope', () => {
     }
   });
 });
+
+describe('scheduled-tasks runtime isolation', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const makeTask = (overrides = {}) => ({
+    id: 'task-1',
+    name: 'Nightly review',
+    enabled: true,
+    schedule: { kind: 'daily', times: ['03:00'], timezone: 'UTC' },
+    execution: { prompt: 'Review open issues', providerID: 'openai', modelID: 'gpt-5' },
+    state: { createdAt: 1, updatedAt: 1 },
+    ...overrides,
+  });
+
+  const stubRunFetch = () => {
+    const posts = [];
+    const created = [];
+    vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
+      const { pathname } = new URL(String(input));
+      if (init.method === 'POST') posts.push({ pathname, body: JSON.parse(init.body) });
+      let data = {};
+      if (pathname === '/api/session') {
+        created.push(posts.at(-1).body);
+        data = { id: 'ses_run' };
+      } else if (pathname === '/api/session/active') {
+        data = {};
+      } else if (pathname === '/api/command') {
+        data = [];
+      }
+      return new Response(JSON.stringify({ location: { directory: '/work/tree' }, data }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }));
+    return { posts, created };
+  };
+
+  const createIsolationRuntime = ({ task, createRunWorktree, readProjectSetup }) => {
+    const statePatches = [];
+    const projectConfigRuntime = {
+      listScheduledTasks: async () => [task],
+      reconcileLoopTasks: async () => [task],
+      updateScheduledTaskState: async (_projectID, _taskID, patch) => {
+        statePatches.push(patch);
+        return { task: { ...task, state: { ...task.state, ...patch } }, updated: true };
+      },
+      updateScheduledTaskStateIf: async () => ({ task, updated: true }),
+      readProjectSetup: readProjectSetup ?? (async () => ({ setupWorktree: [], trust: { trusted: true } })),
+    };
+    const runtime = createScheduledTasksRuntime({
+      projectConfigRuntime,
+      listProjects: async () => [{ id: 'proj', path: '/repo' }],
+      buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
+      getOpenCodeAuthHeaders: () => ({}),
+      waitForOpenCodeReady: async () => {},
+      createRunWorktree: () => createRunWorktree,
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+    });
+    return { runtime, statePatches };
+  };
+
+  it('runs in the worktree createRunWorktree returns and records the branch and base commit', async () => {
+    const { created } = stubRunFetch();
+    const calls = [];
+    const task = makeTask({ isolateRuns: true, baseBranch: 'develop' });
+    const { runtime, statePatches } = createIsolationRuntime({
+      task,
+      createRunWorktree: async (input) => {
+        calls.push(input);
+        return {
+          ok: true,
+          directory: '/work/isolated',
+          worktree: { branch: 'nightly-review-20261025-0300', head: 'abc1234', path: '/work/isolated' },
+        };
+      },
+    });
+    await runtime.start();
+    const result = await runtime.runNow('proj', 'task-1');
+    runtime.stop();
+
+    expect(result.ok).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].worktree.startRef).toBe('develop');
+    expect(calls[0].worktree.name).toMatch(/^nightly-review-\d{8}-\d{4}$/);
+    expect(calls[0].worktree.branchName).toBe(calls[0].worktree.name);
+    // The session opens in the worktree's start directory, not the project.
+    expect(created).toHaveLength(1);
+    expect(created[0].location.directory).toBe('/work/isolated');
+
+    const patch = statePatches.at(-1);
+    expect(patch.lastIsolated).toBe(true);
+    expect(patch.lastBranch).toBe('nightly-review-20261025-0300');
+    expect(patch.lastWorktree).toEqual({
+      path: '/work/isolated',
+      branch: 'nightly-review-20261025-0300',
+      baseRef: 'abc1234',
+    });
+  });
+
+  it('runs in the project directory when the project is not a git repository', async () => {
+    const { created } = stubRunFetch();
+    const task = makeTask({ isolateRuns: true });
+    const { runtime, statePatches } = createIsolationRuntime({
+      task,
+      createRunWorktree: async () => ({ ok: false, reason: 'not-a-git-repository' }),
+    });
+    await runtime.start();
+    const result = await runtime.runNow('proj', 'task-1');
+    runtime.stop();
+
+    expect(result.ok).toBe(true);
+    expect(created[0].location.directory).toBe('/repo');
+    const patch = statePatches.at(-1);
+    expect(patch.lastIsolated).toBe(false);
+    expect(patch.lastBranch).toBeUndefined();
+    expect(patch.lastWorktree).toBeUndefined();
+  });
+
+  it('fails the run when worktree creation fails, and records the error', async () => {
+    stubRunFetch();
+    const task = makeTask({ isolateRuns: true });
+    const { runtime, statePatches } = createIsolationRuntime({
+      task,
+      createRunWorktree: async () => ({ ok: false, error: 'branch already exists' }),
+    });
+    await runtime.start();
+    const result = await runtime.runNow('proj', 'task-1');
+    runtime.stop();
+
+    expect(result.ok).toBe(false);
+    const patch = statePatches.at(-1);
+    expect(patch.lastStatus).toBe('error');
+    expect(patch.lastError).toContain('branch already exists');
+  });
+
+  it('passes trusted setup commands to the worktree and skips untrusted ones', async () => {
+    stubRunFetch();
+    const seen = [];
+    const task = makeTask({ isolateRuns: true });
+    const { runtime } = createIsolationRuntime({
+      task,
+      readProjectSetup: async () => ({
+        setupWorktree: ['bun install', 'cp "$ROOT_PROJECT_PATH/.env.example" .env'],
+        trust: { trusted: false },
+      }),
+      createRunWorktree: async (input) => {
+        seen.push(input.worktree.startCommand);
+        return { ok: true, directory: '/work/isolated', worktree: { branch: 'b', head: 'h', path: '/work/isolated' } };
+      },
+    });
+    await runtime.start();
+    await runtime.runNow('proj', 'task-1');
+    runtime.stop();
+
+    // Untrusted: no start command travels.
+    expect(seen).toEqual([undefined]);
+  });
+
+  it('substitutes $ROOT_PROJECT_PATH in trusted setup commands', async () => {
+    stubRunFetch();
+    const seen = [];
+    const task = makeTask({ isolateRuns: true });
+    const { runtime } = createIsolationRuntime({
+      task,
+      readProjectSetup: async () => ({
+        setupWorktree: ['cp "$ROOT_PROJECT_PATH/.env.example" .env'],
+        trust: { trusted: true },
+      }),
+      createRunWorktree: async (input) => {
+        seen.push(input.worktree.startCommand);
+        return { ok: true, directory: '/work/isolated', worktree: { branch: 'b', head: 'h', path: '/work/isolated' } };
+      },
+    });
+    await runtime.start();
+    await runtime.runNow('proj', 'task-1');
+    runtime.stop();
+
+    expect(seen).toEqual(['cp "/repo/.env.example" .env']);
+  });
+
+  it('ignores the isolation fields for a chats-scope task', async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oc-runtime-isolation-chats-'));
+    const chatsScope = createChatsScope(path.join(tempRoot, 'chats'));
+    stubRunFetch();
+    let createCalls = 0;
+    const task = makeTask({ isolateRuns: true });
+    const runtime = createScheduledTasksRuntime({
+      projectConfigRuntime: {
+        listScheduledTasks: async () => [task],
+        reconcileLoopTasks: async () => [task],
+        updateScheduledTaskState: async () => ({ task, updated: true }),
+        updateScheduledTaskStateIf: async () => ({ task, updated: true }),
+      },
+      listProjects: async () => [{ id: 'proj', path: '/repo' }],
+      chatsScope,
+      buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
+      getOpenCodeAuthHeaders: () => ({}),
+      waitForOpenCodeReady: async () => {},
+      createRunWorktree: () => async () => {
+        createCalls += 1;
+        return { ok: true, directory: '/work/x', worktree: { branch: 'b', head: 'h', path: '/work/x' } };
+      },
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+    });
+    try {
+      await runtime.start();
+      const result = await runtime.runNow(chatsScope.id, 'task-1');
+      runtime.stop();
+      expect(result.ok).toBe(true);
+      expect(createCalls).toBe(0);
+      expect(path.relative(chatsScope.root, result.directory)).toMatch(/^\d{4}-\d{2}-\d{2}[\\/]session-/);
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+});

@@ -8,6 +8,7 @@ import {
   listStashes as listStashesDefault,
   removeWorktree as removeWorktreeDefault,
   resolvePrimaryWorktreeRoot,
+  resolveRepositoryGitPaths,
   resolveWorktreeTopLevel as resolveWorktreeTopLevelDefault,
   stashApply as stashApplyDefault,
   stashDrop as stashDropDefault,
@@ -455,13 +456,16 @@ const resolveWorktreeInput = (payload) => {
   if (!name) return null;
   const branchName = asNonEmptyString(payload.worktree.branchName);
   const startRef = asNonEmptyString(payload.worktree.startRef);
-  return {
+  const startCommand = asNonEmptyString(payload.worktree.startCommand);
+  const input = {
     mode: 'new',
     name,
     ...(branchName ? { branchName } : {}),
     ...(startRef ? { startRef } : {}),
     ...(typeof payload.setUpstream === 'boolean' ? { setUpstream: payload.setUpstream } : {}),
   };
+  if (startCommand) input.startCommand = startCommand;
+  return input;
 };
 
 export const createOpenChamberSessionService = (dependencies) => {
@@ -991,6 +995,27 @@ export const createOpenChamberSessionService = (dependencies) => {
     return sessionArchive.unarchive(parsed.ids);
   };
 
+  // One worktree-creation path for `create` and `createRunWorktree`: resolve
+  // the input through createWorktree with the checkout hydration callback,
+  // then wait for the bootstrap to finish. `queueWorktreeBootstrap` runs the
+  // input's `startCommand` between git-ready and setup-ready.
+  const createPlainWorktree = async ({ sourceDirectory, input }) => {
+    if (!(hydrateWorktreeCheckout instanceof Function)
+      || !(worktreeBootstrapStore?.read instanceof Function)
+      || !(worktreeBootstrapStore?.write instanceof Function)) {
+      throw new OpenChamberControlError('Worktree checkout bootstrap is not available', 501);
+    }
+    const hydrateCheckout = ({ directory, parentRemoteName }) => hydrateWorktreeCheckout({
+      directory,
+      parentDirectory: sourceDirectory,
+      parentRemoteName,
+    });
+    return createWorktree(sourceDirectory, input, {
+      bootstrapStore: worktreeBootstrapStore,
+      hydrateCheckout,
+    });
+  };
+
   const create = async (payload = {}) => {
     const title = asNonEmptyString(payload.title);
     const prompt = asNonEmptyString(payload.prompt);
@@ -1053,20 +1078,7 @@ export const createOpenChamberSessionService = (dependencies) => {
         bootstrapStore: worktreeBootstrapStore,
       });
     } else if (worktreeInput) {
-      if (!(hydrateWorktreeCheckout instanceof Function)
-        || !(worktreeBootstrapStore?.read instanceof Function)
-        || !(worktreeBootstrapStore?.write instanceof Function)) {
-        throw new OpenChamberControlError('Worktree checkout bootstrap is not available', 501);
-      }
-      const hydrateCheckout = ({ directory, parentRemoteName }) => hydrateWorktreeCheckout({
-        directory,
-        parentDirectory: resolvedDirectory.directory,
-        parentRemoteName,
-      });
-      worktree = await createWorktree(resolvedDirectory.directory, worktreeInput, {
-        bootstrapStore: worktreeBootstrapStore,
-        hydrateCheckout,
-      });
+      worktree = await createPlainWorktree({ sourceDirectory: resolvedDirectory.directory, input: worktreeInput });
       sessionDirectory = worktree.path;
       await waitForWorktreeBootstrapReady({
         directory: sessionDirectory,
@@ -1335,6 +1347,49 @@ export const createOpenChamberSessionService = (dependencies) => {
     });
   };
 
+  // createRunWorktree creates a worktree for a scheduled task run: the
+  // worktree-creation part of `create` without the session and the prompt.
+  // It answers `{ ok: true, directory, worktree, fallback }` on success and
+  // `{ ok: false, reason: 'not-a-git-repository' }` when the project cannot
+  // host a worktree at all, so the caller can take its non-git fallback.
+  const createRunWorktree = async ({ projectId, directory, worktree: worktreeInput }) => {
+    const scope = {};
+    if (projectId !== undefined) scope.projectId = projectId;
+    if (directory !== undefined) scope.directory = directory;
+    const resolvedDirectory = await resolveRequestedDirectory({
+      payload: scope,
+      readSettingsFromDiskMigrated,
+      sanitizeProjects,
+      validateDirectoryPath,
+    });
+    if (!resolvedDirectory.ok) {
+      throw new OpenChamberControlError(resolvedDirectory.error, resolvedDirectory.status || 400);
+    }
+
+    const resolvedGitPaths = await resolveRepositoryGitPaths(resolvedDirectory.directory);
+    if (!resolvedGitPaths.supported) {
+      return { ok: false, reason: 'not-a-git-repository' };
+    }
+
+    const worktree = await createPlainWorktree({
+      sourceDirectory: resolvedDirectory.directory,
+      input: { mode: 'new', ...worktreeInput },
+    });
+    let sessionDirectory = worktree.path;
+    await waitForWorktreeBootstrapReady({
+      directory: sessionDirectory,
+      bootstrapStore: worktreeBootstrapStore,
+    });
+
+    let startDirectoryFallback = null;
+    ({ directory: sessionDirectory, fallback: startDirectoryFallback } = await resolveStartDirectory({
+      projectPath: resolvedDirectory.projectPath ?? resolvedDirectory.directory,
+      worktreeRoot: sessionDirectory,
+    }));
+
+    return { ok: true, directory: sessionDirectory, worktree, fallback: startDirectoryFallback };
+  };
+
   // The control service's session reads resolve projectId through the same
   // lookup as create/send/fork, so an unknown project or a missing project
   // folder fails the same way everywhere.
@@ -1363,6 +1418,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     send: (sessionID, payload) => runExisting('send', sessionID, payload),
     fork: (sessionID, payload) => runExisting('fork', sessionID, payload),
     moveToWorktree,
+    createRunWorktree,
   };
 };
 

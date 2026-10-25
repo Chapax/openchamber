@@ -6,6 +6,7 @@ import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js
 import { discoverLoops } from './loops.js';
 import { assertOpenCodeApiResponse } from '../opencode/prompt-response.js';
 import { createExistingSessionTasks } from './existing-session.js';
+import { countCommitsAhead, getStatus as getGitStatus, removeWorktree } from '../git/index.js';
 
 const DEFAULT_GLOBAL_CONCURRENCY = 4;
 const DEFAULT_PROJECT_CONCURRENCY = 2;
@@ -247,6 +248,38 @@ export const formatScheduledSessionTitle = (task, nowMs = Date.now()) => {
   return `${trimmedName}${suffix}`;
 };
 
+// A git-safe slug for worktree and branch names derived from the task name.
+const cleanTaskNameForWorktree = (name) => (
+  String(name ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64) || 'task'
+);
+
+const buildIsolatedWorktreeName = (taskName, startedAt) => (
+  `${cleanTaskNameForWorktree(taskName)}-${DateTime.fromMillis(startedAt).toFormat('yyyyMMdd-HHmm')}`
+);
+
+// The same variable substitution the UI's buildSdkStartCommand applies
+// (`openchamberConfig.ts`): the project root stands in for $ROOT_PROJECT_PATH
+// and its older alias.
+const substituteCommandVariables = (command, variables) => (
+  String(command ?? '')
+    .replace(/\$\{?ROOT_PROJECT_PATH\}?/g, variables.rootWorktreePath)
+    .replace(/\$\{?ROOT_WORKTREE_PATH\}?/g, variables.rootWorktreePath)
+);
+
+// Carry a failed run's isolation facts on the thrown error, so the completion
+// state patch in runTask can record the worktree that exists on disk even
+// though the run never returned.
+const withRunIsolation = (error, isolation) => (
+  Object.assign(
+    error instanceof Error ? error : new Error(safeErrorMessage(error)),
+    { isolation },
+  )
+);
+
 export const createScheduledTasksRuntime = (deps) => {
   const {
     projectConfigRuntime,
@@ -269,6 +302,11 @@ export const createScheduledTasksRuntime = (deps) => {
     messageQueueRuntime,
     resolvePrimaryWorktreeRoot,
     isSessionArchived,
+    // Worktree creation for isolated runs, as a lazy closure over the session
+    // service (built after this runtime in index.js): `() => (input) => result`
+    // where result is `{ ok: true, directory, worktree, fallback }` or
+    // `{ ok: false, reason: 'not-a-git-repository' }`.
+    createRunWorktree = null,
     logger = console,
     maxGlobalConcurrency = DEFAULT_GLOBAL_CONCURRENCY,
     maxProjectConcurrency = DEFAULT_PROJECT_CONCURRENCY,
@@ -591,6 +629,126 @@ export const createScheduledTasksRuntime = (deps) => {
     });
   };
 
+  // Drop the previous run's worktree when nothing in it would be lost. A run
+  // "finishes" at dispatch while the agent may keep working, so this is lazy:
+  // it runs right before the next isolated run instead of at completion, and
+  // the recorded session, changes, or commits beyond the base branch keep the
+  // worktree in place. A crashed server's leftovers are cleaned by the next
+  // run the same way.
+  const cleanupPreviousRunWorktree = async ({ projectID, task }) => {
+    const record = task?.state?.lastWorktree;
+    if (task?.state?.lastIsolated !== true || !record?.path || !record.branch || !record.baseRef) {
+      return;
+    }
+    const keep = (why) => {
+      logger.info?.('[ScheduledTasks] previous run worktree kept', {
+        projectID,
+        taskID: task.id,
+        path: record.path,
+        reason: why,
+      });
+    };
+    try {
+      // An active agent still works in the worktree; its session id was
+      // recorded at dispatch.
+      const client = createScopedClient(record.path);
+      const statuses = await client.session.active();
+      if (task.state.lastSessionId && statuses?.[task.state.lastSessionId]) {
+        keep('session-active');
+        return;
+      }
+      const status = await getGitStatus(record.path, { mode: 'light' });
+      if (Array.isArray(status?.files) && status.files.length > 0) {
+        keep('uncommitted-changes');
+        return;
+      }
+      const commitsAhead = await countCommitsAhead(record.path, record.baseRef, record.branch);
+      if (commitsAhead === null || commitsAhead > 0) {
+        keep('commits-beyond-base');
+        return;
+      }
+      await removeWorktree(record.path, { deleteLocalBranch: true });
+      logger.info?.('[ScheduledTasks] previous run worktree removed', {
+        projectID,
+        taskID: task.id,
+        path: record.path,
+      });
+    } catch (error) {
+      logger.warn?.('[ScheduledTasks] previous run worktree cleanup failed; keeping it', {
+        projectID,
+        taskID: task.id,
+        path: record.path,
+        error: safeErrorMessage(error),
+      });
+    }
+  };
+
+  // Create the worktree an isolated run executes in, and answer the facts the
+  // completion state patch records: the start directory, the created branch,
+  // and the resolved base commit (`baseRef`), so cleanup can later tell real
+  // work from a base branch that has moved on.
+  const prepareIsolatedDirectory = async ({ projectID, task, projectPath, startedAt }) => {
+    await cleanupPreviousRunWorktree({ projectID, task });
+
+    const createRunWorktreeFn = createRunWorktree?.();
+    if (!createRunWorktreeFn) {
+      throw new Error('scheduled task isolation is unavailable: worktree creation is not wired');
+    }
+
+    const preferredName = buildIsolatedWorktreeName(task.name, startedAt);
+    const startRef = task.baseBranch?.trim() || 'HEAD';
+
+    // Setup commands come from the project's worktree setup. A scheduled run
+    // is unattended and cannot confirm the shared-trust dialog, so untrusted
+    // shared commands are skipped with a log; the OpenCode project record's
+    // own start command still runs for every worktree.
+    let setupCommands = [];
+    try {
+      const projectSetup = await projectConfigRuntime.readProjectSetup(projectID);
+      if (Array.isArray(projectSetup?.setupWorktree) && projectSetup.setupWorktree.length > 0) {
+        if (projectSetup.trust?.trusted) {
+          setupCommands = projectSetup.setupWorktree;
+        } else {
+          logger.warn?.('[ScheduledTasks] worktree setup commands skipped: shared commands are not trusted', {
+            projectID,
+            taskID: task.id,
+          });
+        }
+      }
+    } catch (error) {
+      logger.warn?.('[ScheduledTasks] worktree setup commands unreadable; continuing without them', {
+        projectID,
+        taskID: task.id,
+        error: safeErrorMessage(error),
+      });
+    }
+
+    const startCommand = setupCommands
+      .map((command) => substituteCommandVariables(command, { rootWorktreePath: projectPath }))
+      .filter(Boolean)
+      .join(' && ');
+    const worktreeInput = { name: preferredName, branchName: preferredName, startRef };
+    if (startCommand) worktreeInput.startCommand = startCommand;
+
+    const result = await createRunWorktreeFn({
+      projectId: projectID,
+      directory: projectPath,
+      worktree: worktreeInput,
+    });
+    if (result?.ok) {
+      return {
+        isolated: true,
+        directory: result.directory,
+        branch: result.worktree?.branch ?? preferredName,
+        baseRef: result.worktree?.head ?? startRef,
+      };
+    }
+    if (result?.reason === 'not-a-git-repository') {
+      return { isolated: false, directory: projectPath };
+    }
+    throw new Error(result?.error ? `Worktree creation failed: ${result.error}` : 'Worktree creation failed');
+  };
+
   const runTaskWithWatchdog = async (projectID, task, reason, onSessionCreated) => {
     const startedAt = Date.now();
     const title = formatScheduledSessionTitle(task, startedAt);
@@ -605,105 +763,131 @@ export const createScheduledTasksRuntime = (deps) => {
 
     // A chats-scope run is a new chat, so it gets its own directory the way a
     // chat started from the UI does; a project run works in the project.
-    const directory = isChatsScope(projectID)
+    const chatsDirectory = isChatsScope(projectID)
       ? await chatsScope.createChatDirectory(new Date(startedAt))
-      : projectPath;
+      : null;
+    let directory = chatsDirectory ?? projectPath;
 
-    const baseUrl = openCodeOrigin();
-    const authHeaders = getOpenCodeAuthHeaders();
-    const client = createScopedClient(directory);
-    const selection = await resolveRunSelection(projectID, task);
-
-    // Agent, model and variant belong to the session in v2: a scheduled run
-    // fixes them here instead of repeating them on every prompt.
-    let sessionID;
-    try {
-      const session = await client.session.create({
-        title,
-        location: { directory },
-        // Marks a run of a task, so it stays out of In work: nobody sent it.
-        metadata: { openchamber: { kind: 'scheduled' } },
-        // No model or agent at all: OpenCode picks its own default.
-        ...(selection.providerID && selection.modelID ? {
-          model: {
-            providerID: selection.providerID,
-            id: selection.modelID,
-            ...(selection.variant ? { variant: selection.variant } : {}),
-          },
-        } : {}),
-        ...(selection.agent ? { agent: selection.agent } : {}),
-      });
-      sessionID = session?.id;
-      if (!sessionID) {
-        throw new Error('failed to create session');
-      }
-    } catch (error) {
-      if (directory !== projectPath) {
-        await chatsScope.discardChatDirectory(directory);
-      }
-      throw error;
+    // Isolation: a project task that asks for it runs in a fresh worktree on a
+    // chosen branch. A non-git project falls back to the project directory
+    // (isolation is impossible there, not skipped silently on a git project);
+    // any other worktree failure fails the run — quietly writing into the
+    // user's checkout would defeat the isolation promise.
+    let runIsolation = null;
+    if (chatsDirectory === null && task.isolateRuns === true) {
+      runIsolation = await prepareIsolatedDirectory({ projectID, task, projectPath, startedAt });
+      directory = runIsolation.directory;
     }
 
-    // Before the event, so a UI refreshing on it already sees the session.
-    await onSessionCreated?.(sessionID);
-
+    // One attach point for isolation facts: whatever fails after the
+    // worktree exists must still let the completion patch record it, so
+    // the next run can evaluate it for cleanup.
     try {
-      emitTaskRunEvent?.({
-        projectID,
-        taskID: task.id,
-        ranAt: startedAt,
-        status: 'running',
-        sessionID,
-      });
-    } catch {
-    }
+      const baseUrl = openCodeOrigin();
+      const authHeaders = getOpenCodeAuthHeaders();
+      const client = createScopedClient(directory);
+      const selection = await resolveRunSelection(projectID, task);
 
-    if (task.execution.permissionAutoAccept && typeof setSessionAutoAccept === 'function') {
-      // Enroll before the prompt goes out so the very first permission request
-      // is already auto-approved. Enrollment failure must not kill the run —
-      // the task still executes, permissions just wait for the user.
+      // Agent, model and variant belong to the session in v2: a scheduled run
+      // fixes them here instead of repeating them on every prompt.
+      let sessionID;
       try {
-        await setSessionAutoAccept(sessionID, true, directory);
+        const session = await client.session.create({
+          title,
+          location: { directory },
+          // Marks a run of a task, so it stays out of In work: nobody sent it.
+          metadata: { openchamber: { kind: 'scheduled' } },
+          // No model or agent at all: OpenCode picks its own default.
+          ...(selection.providerID && selection.modelID ? {
+            model: {
+              providerID: selection.providerID,
+              id: selection.modelID,
+              ...(selection.variant ? { variant: selection.variant } : {}),
+            },
+          } : {}),
+          ...(selection.agent ? { agent: selection.agent } : {}),
+        });
+        sessionID = session?.id;
+        if (!sessionID) {
+          throw new Error('failed to create session');
+        }
       } catch (error) {
-        logger.warn?.('[scheduled-tasks] failed to enable permission auto-accept for session', sessionID, error?.message ?? error);
+        // Only a chats-scope directory is throwaway: it was created for this
+        // run alone. A project run's directory is either the user's checkout or
+        // a worktree that keeps the run's state for inspection and cleanup.
+        if (chatsDirectory !== null) {
+          await chatsScope.discardChatDirectory(directory);
+        }
+        throw error;
       }
-    }
 
-    const scheduledCommand = await resolveScheduledCommand({ client, projectPath: directory, task });
+      // Before the event, so a UI refreshing on it already sees the session.
+      await onSessionCreated?.(sessionID);
 
-    if (task.execution.goalEnabled) {
-      const commandObjective = scheduledCommand
-        ? expandCommandGoalObjective(scheduledCommand.template, scheduledCommand.arguments)
-        : null;
-      await createSessionGoal({
-        baseUrl,
-        authHeaders,
-        persistSessionGoal,
+      try {
+        emitTaskRunEvent?.({
+          projectID,
+          taskID: task.id,
+          ranAt: startedAt,
+          status: 'running',
+          sessionID,
+        });
+      } catch {
+      }
+
+      if (task.execution.permissionAutoAccept && typeof setSessionAutoAccept === 'function') {
+        // Enroll before the prompt goes out so the very first permission request
+        // is already auto-approved. Enrollment failure must not kill the run —
+        // the task still executes, permissions just wait for the user.
+        try {
+          await setSessionAutoAccept(sessionID, true, directory);
+        } catch (error) {
+          logger.warn?.('[scheduled-tasks] failed to enable permission auto-accept for session', sessionID, error?.message ?? error);
+        }
+      }
+
+      const scheduledCommand = await resolveScheduledCommand({ client, projectPath: directory, task });
+
+      if (task.execution.goalEnabled) {
+        const commandObjective = scheduledCommand
+          ? expandCommandGoalObjective(scheduledCommand.template, scheduledCommand.arguments)
+          : null;
+        await createSessionGoal({
+          baseUrl,
+          authHeaders,
+          persistSessionGoal,
+          sessionID,
+          directory,
+          objective: commandObjective ?? expandSnippets(task.execution.prompt, directory),
+          tokenBudget: task.execution.goalTokenBudget,
+          providerID: selection.providerID ?? undefined,
+          modelID: selection.modelID ?? undefined,
+          onWarning: (message, error) => console.warn(`[scheduled-tasks] ${message}:`, error?.message || error),
+        });
+      }
+
+      if (scheduledCommand) {
+        await runScheduledCommand({ client, sessionID, projectPath: directory, command: scheduledCommand });
+      } else {
+        await runPrompt({ client, sessionID, projectPath: directory, task });
+      }
+
+      const finishedAt = Date.now();
+      return {
         sessionID,
         directory,
-        objective: commandObjective ?? expandSnippets(task.execution.prompt, directory),
-        tokenBudget: task.execution.goalTokenBudget,
-        providerID: selection.providerID ?? undefined,
-        modelID: selection.modelID ?? undefined,
-        onWarning: (message, error) => console.warn(`[scheduled-tasks] ${message}:`, error?.message || error),
-      });
+        durationMs: Math.max(0, finishedAt - startedAt),
+        reason,
+        startedAt,
+        finishedAt,
+        // Isolation facts travel with the result, and with a failure, so the
+        // completion state patch records the worktree that exists on disk even
+        // when the run failed after creating it.
+        isolation: runIsolation,
+      };
+    } catch (error) {
+      throw withRunIsolation(error, runIsolation);
     }
-
-    if (scheduledCommand) {
-      await runScheduledCommand({ client, sessionID, projectPath: directory, command: scheduledCommand });
-    } else {
-      await runPrompt({ client, sessionID, projectPath: directory, task });
-    }
-
-    const finishedAt = Date.now();
-    return {
-      sessionID,
-      directory,
-      durationMs: Math.max(0, finishedAt - startedAt),
-      reason,
-      startedAt,
-      finishedAt,
-    };
   };
 
   const releaseRunningSlot = (projectID, taskKey) => {
@@ -971,6 +1155,7 @@ export const createScheduledTasksRuntime = (deps) => {
         }
       };
 
+      let runIsolation = null;
       try {
         const runPromise = runTaskWithWatchdog(projectID, task, reason, recordCreatedSession);
         let timeoutID;
@@ -988,6 +1173,7 @@ export const createScheduledTasksRuntime = (deps) => {
         sessionID = result.sessionID;
         sessionDirectory = result.directory;
         durationMs = result.durationMs;
+        runIsolation = result.isolation ?? null;
         status = 'success';
         logger.info?.(
           '[ScheduledTasks] run completed',
@@ -996,6 +1182,9 @@ export const createScheduledTasksRuntime = (deps) => {
       } catch (error) {
         status = 'error';
         errorMessage = safeErrorMessage(error);
+        // A run that failed after its worktree was created still records the
+        // isolation facts, so the next run can evaluate that worktree.
+        runIsolation = error?.isolation ?? null;
         logger.warn?.('[ScheduledTasks] run failed', {
           projectID,
           taskID,
@@ -1035,6 +1224,13 @@ export const createScheduledTasksRuntime = (deps) => {
         lastDurationMs: durationMs,
         lastError: status === 'error' ? errorMessage : undefined,
         lastSessionId: sessionID ?? createdSessionID,
+        // Isolation facts for the run-history row and the lazy cleanup; a
+        // non-isolated run clears the previous record.
+        lastIsolated: runIsolation?.isolated === true,
+        lastBranch: runIsolation?.isolated === true ? runIsolation.branch : undefined,
+        lastWorktree: runIsolation?.isolated === true
+          ? { path: runIsolation.directory, branch: runIsolation.branch, baseRef: runIsolation.baseRef }
+          : undefined,
         nextRunAt: Number.isFinite(nextRunAt) ? nextRunAt : undefined,
         updatedAt: finishedAt,
       };
@@ -1072,6 +1268,11 @@ export const createScheduledTasksRuntime = (deps) => {
             lastDurationMs: durationMs,
             lastError: status === 'error' ? errorMessage : undefined,
             lastSessionId: sessionID ?? createdSessionID,
+            lastIsolated: runIsolation?.isolated === true,
+            lastBranch: runIsolation?.isolated === true ? runIsolation.branch : undefined,
+            lastWorktree: runIsolation?.isolated === true
+              ? { path: runIsolation.directory, branch: runIsolation.branch, baseRef: runIsolation.baseRef }
+              : undefined,
             nextRunAt: Number.isFinite(nextRunAt) ? nextRunAt : undefined,
             updatedAt: finishedAt,
           },

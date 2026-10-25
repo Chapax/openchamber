@@ -130,6 +130,14 @@ const buildScheduledTask = (input) => {
   if (goalTokenBudget !== undefined && (!Number.isSafeInteger(goalTokenBudget) || goalTokenBudget < 1000 || goalTokenBudget > 100_000_000)) {
     throw new OpenChamberControlError('goalTokenBudget must be from 1000 to 100000000', 400);
   }
+  // Isolation: validate baseBranch requires isolateRuns
+  if (asNonEmptyString(input.baseBranch) && input.isolateRuns !== true) {
+    throw new OpenChamberControlError('baseBranch requires isolateRuns: true', 400);
+  }
+  // Existing-session tasks ignore isolation: reject if combined with targetSessionId
+  if (targetSessionId && (input.isolateRuns === true || asNonEmptyString(input.baseBranch))) {
+    throw new OpenChamberControlError('isolateRuns and baseBranch are not compatible with existing sessions', 400);
+  }
   const task = {
     name,
     enabled: input.disabled !== true,
@@ -144,6 +152,8 @@ const buildScheduledTask = (input) => {
     },
   };
   if (input.targetSessionId !== undefined) task.targetSessionId = targetSessionId ?? input.targetSessionId;
+  if (input.isolateRuns === true) task.isolateRuns = true;
+  if (asNonEmptyString(input.baseBranch)) task.baseBranch = input.baseBranch.trim();
   return task;
 };
 
@@ -199,7 +209,28 @@ const patchScheduledTask = (existing, input) => {
   const schedule = replacesSchedule
     ? buildSchedule(input)
     : (timezone ? { ...existing.schedule, timezone } : existing.schedule);
-  return {
+
+  // Isolation: only named fields change; turning isolation off drops the
+  // stored base branch with it, and neither field may combine with an
+  // existing-session target (the session's own directory wins there).
+  let isolateRuns = existing.isolateRuns;
+  if (input.isolateRuns !== undefined) {
+    if (input.isolateRuns === true && existing.targetSessionId) {
+      throw new OpenChamberControlError('isolateRuns is not compatible with existing sessions', 400);
+    }
+    isolateRuns = input.isolateRuns === true;
+  }
+  let baseBranch = existing.baseBranch;
+  if (input.baseBranch !== undefined) {
+    baseBranch = asNonEmptyString(input.baseBranch) ?? undefined;
+    if (baseBranch) {
+      if (!isolateRuns) throw new OpenChamberControlError('baseBranch requires isolateRuns: true', 400);
+      if (existing.targetSessionId) throw new OpenChamberControlError('baseBranch is not compatible with existing sessions', 400);
+    }
+  }
+  if (isolateRuns !== true) baseBranch = undefined;
+
+  const patch = {
     id: existing.id,
     targetSessionId: input.targetSessionId === undefined ? existing.targetSessionId : input.targetSessionId,
     name,
@@ -207,6 +238,9 @@ const patchScheduledTask = (existing, input) => {
     schedule,
     execution,
   };
+  if (isolateRuns !== undefined) patch.isolateRuns = isolateRuns;
+  if (baseBranch) patch.baseBranch = baseBranch;
+  return patch;
 };
 
 export const createOpenChamberControlService = (dependencies) => {

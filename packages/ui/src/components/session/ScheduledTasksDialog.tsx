@@ -748,6 +748,26 @@ export function ScheduledTasksView({ layout, onLeave }: {
                       <span>{t('sessions.scheduledTasks.dialog.lastRun.never')}</span>
                     )}
                   </span>
+                  {/* Show isolation and branch for last run */}
+                  {task.state?.lastIsolated || task.state?.lastBranch ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      {task.state?.lastIsolated ? (
+                        <>
+                          <span className="rounded px-1.5 py-0.5 typography-micro font-medium" style={{ background: 'var(--muted)', color: 'var(--muted-foreground)' }}>
+                            {t('sessions.scheduledTasks.dialog.lastRun.isolated')}
+                          </span>
+                          {task.state?.lastBranch ? (
+                            <>
+                              <span className="text-muted-foreground/50">·</span>
+                              <span>{t('sessions.scheduledTasks.dialog.lastRun.branch', { branch: task.state.lastBranch })}</span>
+                            </>
+                          ) : null}
+                        </>
+                      ) : task.state?.lastBranch ? (
+                        <span>{t('sessions.scheduledTasks.dialog.lastRun.branch', { branch: task.state.lastBranch })}</span>
+                      ) : null}
+                    </span>
+                  ) : null}
                 </div>
 
                 {task.state?.lastError ? (

@@ -164,6 +164,32 @@ reaches it on its next run without editing it. With nothing set, the session is
 created without a model or agent and OpenCode applies its own. A pinned value
 stored next to `useDefaults` is kept only for when the task is pinned again.
 
+## Isolation
+
+When `isolateRuns: true`, the task runs in a fresh worktree instead of the
+project directory. The worktree branches from `baseBranch` (default: `HEAD`
+at run time) and runs setup commands from the project's `setupWorktree` only
+when trust is current (the scheduled run cannot show the trust dialog;
+untrusted shared commands are skipped with a log, while the OpenCode project
+record's own start command always runs).
+
+A git repository is required. Non-git projects fall back to running in the
+project directory without an error; any other worktree-creation failure fails
+the run — a git project must not quietly write into the user's checkout.
+Existing-session tasks ignore isolation, and the agent tool rejects the
+fields combined with `targetSessionId`.
+
+The worktree is created through the session service's `createRunWorktree`
+(`openchamber-sessions/routes.js`), the same `createWorktree` → bootstrap →
+start-directory path `create` gives a new worktree, so there is exactly one
+worktree-creation path. It creates no session and dispatches no prompt; the
+runtime wired it as a lazy closure because the scheduled runtime is built
+before the session service.
+
+Run history records `lastIsolated`, `lastBranch`, and `lastWorktree` (path,
+branch, and the resolved base commit `baseRef`) for each run so the scheduler
+can clean up unused worktrees (see *Worktree lifecycle* below).
+
 ## Files
 
 - `packages/web/server/lib/scheduled-tasks/runtime.js`
@@ -283,6 +309,25 @@ project write lock on every `syncProject` when the project path is known:
   - `syncAllProjects()`
   - `syncProject(projectId)`
   - `runNow(projectId, taskId)`
+
+## Worktree lifecycle
+
+A task that runs isolated creates a worktree for each run. Because a run
+"finishes" at dispatch while the agent may keep working in it, cleanup is
+lazy: right before the next isolated run, the scheduler evaluates the
+previous run's worktree from `state.lastWorktree` and keeps it when anything
+would be lost:
+
+- **Keep** when the recorded session is still active (`client.session.active()`
+  lists it), the worktree has uncommitted changes (`getStatus` files), or
+  `countCommitsAhead(worktree, baseRef, branch)` is not 0 — commits beyond the
+  recorded base commit would be lost on removal.
+- **Remove** otherwise, together with its local branch
+  (`removeWorktree(..., { deleteLocalBranch: true })`).
+
+A cleanup failure keeps the worktree and logs. This bounds accumulation to at
+most one worktree per task between runs, and a crashed server's leftovers are
+cleaned by the next run.
 
 ## Public exports (routes.js)
 

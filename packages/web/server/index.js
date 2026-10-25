@@ -1721,6 +1721,7 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
       }
     }
   },
+  createRunWorktree: () => openChamberSessionService?.createRunWorktree,
   logger: console,
 });
 const emitSessionCreatedEvent = (event) => {

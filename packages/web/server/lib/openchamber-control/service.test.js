@@ -1091,4 +1091,54 @@ describe('returning a dispatched session result', () => {
       .rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining('wait must be a boolean') });
     expect(sessionService.send).not.toHaveBeenCalled();
   });
+  it('creates an isolated task and rejects baseBranch without isolateRuns or with an existing-session target', async () => {
+    const { service, scheduledTaskService } = createService();
+    scheduledTaskService.upsert.mockImplementation(async (_project, task) => ({ task }));
+
+    const created = await service.execute('schedule.create', {
+      name: 'Isolated',
+      prompt: 'Run isolated',
+      daily: '09:00',
+      model: 'provider/model',
+      isolateRuns: true,
+      baseBranch: 'develop',
+    }, '/repo');
+    expect(created.task).toMatchObject({ isolateRuns: true, baseBranch: 'develop' });
+
+    await expect(service.execute('schedule.create', {
+      name: 'Bad', prompt: 'x', daily: '09:00', model: 'provider/model', baseBranch: 'develop',
+    }, '/repo')).rejects.toThrow('baseBranch requires isolateRuns: true');
+
+    await expect(service.execute('schedule.create', {
+      name: 'Bad', prompt: 'x', daily: '09:00', targetSessionId: 'ses_target', isolateRuns: true,
+    }, '/repo')).rejects.toThrow('not compatible with existing sessions');
+  });
+
+  it('updates isolation fields in place and clears baseBranch when isolation turns off', async () => {
+    const { service, scheduledTaskService } = createService();
+    const existing = {
+      id: 'task-1',
+      name: 'Nightly',
+      enabled: true,
+      schedule: { kind: 'daily', times: ['09:00'], timezone: 'UTC' },
+      execution: { prompt: 'Old', providerID: 'a', modelID: 'm' },
+      state: { lastRunAt: 5, lastStatus: 'success' },
+    };
+    scheduledTaskService.list.mockResolvedValue([existing]);
+    scheduledTaskService.upsert.mockImplementation(async (_project, task) => ({ task, created: false }));
+
+    await service.execute('schedule.update', { taskId: 'task-1', isolateRuns: true, baseBranch: 'develop' }, '/repo');
+    expect(scheduledTaskService.upsert.mock.calls[0][1]).toMatchObject({ isolateRuns: true, baseBranch: 'develop' });
+
+    const isolated = { ...existing, isolateRuns: true, baseBranch: 'develop' };
+    scheduledTaskService.list.mockResolvedValue([isolated]);
+    await service.execute('schedule.update', { taskId: 'task-1', isolateRuns: false }, '/repo');
+    const saved = scheduledTaskService.upsert.mock.calls[1][1];
+    expect(saved.isolateRuns).toBe(false);
+    expect(saved.baseBranch).toBeUndefined();
+
+    scheduledTaskService.list.mockResolvedValue([{ ...existing, isolateRuns: false }]);
+    await expect(service.execute('schedule.update', { taskId: 'task-1', baseBranch: 'main' }, '/repo'))
+      .rejects.toThrow('baseBranch requires isolateRuns: true');
+  });
 });

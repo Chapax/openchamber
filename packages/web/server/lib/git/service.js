@@ -2973,6 +2973,27 @@ export async function isAncestorOfHead(directory, sha) {
   return result.success;
 }
 
+/**
+ * Commits reachable from `toRef` that `fromRef` lacks, or `null` when either
+ * ref is missing or unresolvable — a caller deciding on that answer (worktree
+ * cleanup) treats unknown as "keep". Both refs are names or shas git resolves
+ * in `directory`.
+ */
+export async function countCommitsAhead(directory, fromRef, toRef) {
+  const normalizedDirectory = normalizeDirectoryPath(directory);
+  const from = String(fromRef ?? '').trim();
+  const to = String(toRef ?? '').trim();
+  if (!normalizedDirectory || !from || !to) {
+    return null;
+  }
+  const result = await runGitCommand(normalizedDirectory, ['rev-list', '--count', `${from}..${to}`]);
+  if (!result.success) {
+    return null;
+  }
+  const count = Number.parseInt(result.stdout.trim(), 10);
+  return Number.isSafeInteger(count) && count >= 0 ? count : null;
+}
+
 const PATCH_EQUIVALENCE_TIMEOUT_MS = 5_000;
 
 // Whether a commit has an equivalent patch reachable from the checked-out HEAD.
