@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import simpleGit from 'simple-git';
+import { simpleGit } from 'simple-git';
 import { createWorktreeBootstrapStore } from './worktree-bootstrap-storage.js';
 import { loadSourceSections, parseSource, sourceKey } from '../walkthrough/sources.js';
 import { registerGitRoutes } from './routes.js';
@@ -6303,16 +6303,17 @@ describe('git environment through simple-git', () => {
       EDITOR: 'project-editor',
       GIT_TERMINAL_PROMPT: '1',
       GIT_DIR: '/elsewhere/.git',
+      GIT_PROJECT_FLAG: 'from-project',
     }));
     configureGitEnvironment({ forDirectory });
     try {
       await withProcessEnv({ EDITOR: undefined, GIT_TERMINAL_PROMPT: undefined }, async () => {
-        const { repo, readHookLog } = createRepositoryLoggingHookEnv(['PROJECT_TOOL', 'EDITOR', 'GIT_TERMINAL_PROMPT', 'PATH']);
+        const { repo, readHookLog } = createRepositoryLoggingHookEnv(['PROJECT_TOOL', 'EDITOR', 'GIT_TERMINAL_PROMPT', 'GIT_PROJECT_FLAG', 'PATH']);
         await commit(repo, 'init', { addAll: true });
-        const [projectTool, editor, prompt, hookPath] = readHookLog().split('|');
+        const [projectTool, editor, prompt, projectFlag, hookPath] = readHookLog().split('|');
         // The commit landed in this repository, not in GIT_DIR's.
         expect((await getLog(repo, { maxCount: 1 })).all).toHaveLength(1);
-        expect([projectTool, editor, prompt]).toEqual(['from-project', '<unset>', '0']);
+        expect([projectTool, editor, prompt, projectFlag]).toEqual(['from-project', '<unset>', '0', 'from-project']);
         expect(hookPath.split(':')).toContain('/opt/project-tools/bin');
         expect(forDirectory).toHaveBeenCalledWith(repo);
       });
@@ -6346,16 +6347,19 @@ describe('git environment through simple-git', () => {
     }
   });
 
-  it('keeps working, and passes them to git, when the process env sets editor, pager, ssh or askpass programs', async () => {
+  it('keeps working, and passes them to git, when the process env sets editor, pager, ssh or askpass programs, a config path or other GIT_ variables', async () => {
     if (!canRunGit() || process.platform === 'win32') return;
     const programs = {
       EDITOR: 'vim',
+      VISUAL: 'vim',
       GIT_EDITOR: 'vim',
       PAGER: 'less',
       GIT_PAGER: 'less',
       GIT_SSH_COMMAND: 'ssh -i /tmp/openchamber-test-key -o IdentitiesOnly=yes',
       GIT_ASKPASS: '/usr/bin/true',
       SSH_ASKPASS: '/usr/bin/true',
+      GIT_CONFIG_GLOBAL: os.devNull,
+      GIT_INHERITED_FLAG: 'from-server',
     };
     // Git itself hands hooks GIT_EDITOR=: when a commit message needs no editor.
     const observed = Object.keys(programs).filter((name) => name !== 'GIT_EDITOR');
