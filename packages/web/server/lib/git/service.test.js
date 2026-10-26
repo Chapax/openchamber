@@ -6358,15 +6358,32 @@ describe('git environment through simple-git', () => {
       GIT_SSH_COMMAND: 'ssh -i /tmp/openchamber-test-key -o IdentitiesOnly=yes',
       GIT_ASKPASS: '/usr/bin/true',
       SSH_ASKPASS: '/usr/bin/true',
+      GIT_SSH: '/usr/bin/ssh',
+      GIT_PROXY_COMMAND: '/usr/bin/true',
+      GIT_SEQUENCE_EDITOR: 'vim',
+      GIT_EXTERNAL_DIFF: '/usr/bin/true',
+      GIT_TEMPLATE_DIR: createTempDir(),
+      GIT_EXEC_PATH: execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim(),
+      PREFIX: '/usr',
       GIT_CONFIG_GLOBAL: os.devNull,
+      GIT_CONFIG_SYSTEM: os.devNull,
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'openchamber.test',
+      GIT_CONFIG_VALUE_0: 'from-server',
+      GIT_CONFIG_PARAMETERS: "'openchamber.parameter'='from-server'",
       GIT_INHERITED_FLAG: 'from-server',
     };
     // Git itself hands hooks GIT_EDITOR=: when a commit message needs no editor.
     const observed = Object.keys(programs).filter((name) => name !== 'GIT_EDITOR');
+    const { repo, readHookLog } = createRepositoryLoggingHookEnv(observed);
     await withProcessEnv(programs, async () => {
-      const { repo, readHookLog } = createRepositoryLoggingHookEnv(observed);
       await commit(repo, 'init', { addAll: true });
-      expect(readHookLog()).toBe(observed.map((name) => programs[name]).join('|'));
+      const values = readHookLog().split('|');
+      const logged = Object.fromEntries(observed.map((name, index) => [name, values[index]]));
+      // Git appends the -c options of the command it runs the hook from.
+      expect(logged.GIT_CONFIG_PARAMETERS.startsWith(programs.GIT_CONFIG_PARAMETERS)).toBe(true);
+      delete logged.GIT_CONFIG_PARAMETERS;
+      expect(logged).toEqual(Object.fromEntries(Object.keys(logged).map((name) => [name, programs[name]])));
       const status = await getStatus(repo);
       expect(status.current).toBe('main');
     });
